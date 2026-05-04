@@ -34,6 +34,33 @@ def get_live(gamePk):
     url = f"https://statsapi.mlb.com/api/v1.1/game/{gamePk}/feed/live"
     return requests.get(url).json()
 
+# ---------------- SMART LIVE DETECTION ----------------
+def is_game_live(live):
+    try:
+        state = live.get("gameData", {}).get("status", {}).get("abstractGameState")
+
+        if state == "Live":
+            return True
+
+        linescore = live.get("liveData", {}).get("linescore", {})
+
+        # gameplay signals
+        if linescore.get("outs", 0) > 0:
+            return True
+
+        offense = linescore.get("offense", {})
+        if any(offense.get(base) for base in ["first", "second", "third"]):
+            return True
+
+        defense = linescore.get("defense", {})
+        if defense.get("pitcher"):
+            return True
+
+    except:
+        pass
+
+    return False
+
 # ---------------- ODDS ----------------
 def get_market_total(game):
     try:
@@ -75,6 +102,35 @@ def get_market_total(game):
     except:
         return None
 
+# ---------------- LINE MOVEMENT ----------------
+def get_line_movement(gamePk, current):
+    prev = last_totals.get(gamePk)
+    last_totals[gamePk] = current
+
+    if prev is None:
+        return 0
+
+    return round(current - prev, 2)
+
+# ---------------- PITCH COUNT ----------------
+def get_pitch_count(live):
+    try:
+        box = live["liveData"]["boxscore"]
+        defense = live["liveData"]["linescore"].get("defense", {})
+        pid = defense.get("pitcher", {}).get("id")
+
+        if not pid:
+            return 0
+
+        for t in ["home", "away"]:
+            players = box["teams"][t]["players"]
+            key = f"ID{pid}"
+            if key in players:
+                return players[key]["stats"]["pitching"].get("numberOfPitches", 0)
+    except:
+        pass
+    return 0
+
 # ---------------- MODEL ----------------
 def projection(live):
     linescore = live["liveData"]["linescore"]
@@ -93,10 +149,35 @@ def projection(live):
 
     proj = (total / innings_played) * 9
 
-    # runners
+    # runners on base
     offense = linescore.get("offense", {})
     runners = sum([1 for b in ["first", "second", "third"] if offense.get(b)])
     proj += runners * 0.3
+
+    # fatigue
+    pitch_count = get_pitch_count(live)
+    if pitch_count >= 100:
+        proj += 1.2
+    elif pitch_count >= 90:
+        proj += 0.8
+    elif pitch_count >= 75:
+        proj += 0.5
+
+    # bullpen usage
+    box = live["liveData"]["boxscore"]
+    bullpen = len(box["teams"]["home"]["pitchers"]) > 1 or len(box["teams"]["away"]["pitchers"]) > 1
+    if bullpen:
+        proj += 0.5
+
+    # leverage
+    diff = abs(home - away)
+    if inning >= 7:
+        proj += 0.6
+    elif inning >= 5:
+        proj += 0.3
+
+    if diff <= 2:
+        proj += 0.5
 
     return round(proj, 2)
 
@@ -122,13 +203,13 @@ def check():
             inning = linescore.get("currentInning", 0)
             outs = linescore.get("outs", 0)
 
-            print(f"Game {gamePk} | {game_state} | Inning {inning} | Outs {outs}")
+            print(f"Game {gamePk} | State: {game_state} | Inning: {inning} | Outs: {outs}")
 
-            # 🚫 DO NOT MODEL PREVIEW
-            if game_state != "Live":
+            # 🔥 SMART LIVE CHECK
+            if not is_game_live(live):
                 continue
 
-            # must have some game played
+            # wait for meaningful game state
             if inning < 2:
                 continue
 
@@ -149,8 +230,13 @@ def check():
             if key in alerted:
                 continue
 
-            # 🔥 SHARP THRESHOLD
+            # 🔥 sharp threshold
             if abs(edge) < 1.5:
+                continue
+
+            # avoid chasing big moves
+            movement = get_line_movement(gamePk, market)
+            if abs(movement) > 1.5:
                 continue
 
             home = game["teams"]["home"]["team"]["name"]
@@ -164,7 +250,9 @@ def check():
                 f"End {inning}\n\n"
                 f"Model: {model}\n"
                 f"Market: {market}\n"
-                f"Edge: {edge}"
+                f"Edge: {edge}\n"
+                f"Move: {movement}\n"
+                f"Pitch Count: {get_pitch_count(live)}"
             )
 
             alerted.add(key)
