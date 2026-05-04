@@ -24,6 +24,10 @@ def send(msg):
         except Exception as e:
             print("Webhook error:", e)
 
+# ---------------- HELPERS ----------------
+def normalize(name):
+    return name.lower().replace(" ", "").replace(".", "").replace("-", "")
+
 # ---------------- SCHEDULE ----------------
 def get_schedule():
     today = datetime.utcnow().strftime("%Y-%m-%d")
@@ -71,7 +75,7 @@ def is_game_live(live):
 
     return False
 
-# ---------------- ODDS ----------------
+# ---------------- ODDS (FIXED MATCHING) ----------------
 def get_market_total(game):
     try:
         url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/"
@@ -84,30 +88,35 @@ def get_market_total(game):
         data = requests.get(url, params=params).json()
 
         if not isinstance(data, list):
+            print("ODDS BAD RESPONSE:", data)
             return None
 
-        home = game["teams"]["home"]["team"]["name"].lower()
-        away = game["teams"]["away"]["team"]["name"].lower()
-
-        totals = []
+        home = normalize(game["teams"]["home"]["team"]["name"])
+        away = normalize(game["teams"]["away"]["team"]["name"])
 
         for event in data:
-            if home not in event["home_team"].lower():
-                continue
-            if away not in event["away_team"].lower():
-                continue
+            event_home = normalize(event.get("home_team", ""))
+            event_away = normalize(event.get("away_team", ""))
 
-            for book in event.get("bookmakers", []):
-                for market in book.get("markets", []):
-                    if market.get("key") == "totals":
-                        for outcome in market.get("outcomes", []):
-                            if "point" in outcome:
-                                totals.append(outcome["point"])
+            if (home in event_home or event_home in home) and \
+               (away in event_away or event_away in away):
 
-        if not totals:
-            return None
+                totals = []
 
-        return round(sum(totals) / len(totals), 2)
+                for book in event.get("bookmakers", []):
+                    for market in book.get("markets", []):
+                        if market.get("key") == "totals":
+                            for outcome in market.get("outcomes", []):
+                                if "point" in outcome:
+                                    totals.append(outcome["point"])
+
+                if totals:
+                    avg = round(sum(totals) / len(totals), 2)
+                    print(f"✅ MATCHED ODDS: {avg}")
+                    return avg
+
+        print("❌ NO MATCH:", home, "vs", away)
+        return None
 
     except Exception as e:
         print("Odds error:", e)
@@ -219,7 +228,6 @@ def check():
             if inning < 1:
                 continue
 
-            # 🔥 loosened condition
             if outs not in [0, 2]:
                 continue
 
@@ -238,7 +246,6 @@ def check():
             if key in alerted:
                 continue
 
-            # 🔥 loosened threshold
             if abs(edge) < 0.5:
                 continue
 
