@@ -13,14 +13,6 @@ ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 print("WEBHOOK:", "SET" if WEBHOOK else "MISSING")
 print("ODDS API:", "SET" if ODDS_API_KEY else "MISSING")
 
-import requests
-import time
-from datetime import datetime
-import os
-
-WEBHOOK = os.getenv("DISCORD_WEBHOOK")
-ODDS_API_KEY = os.getenv("ODDS_API_KEY")
-
 alerted = set()
 last_totals = {}
 
@@ -29,26 +21,23 @@ def send(msg):
     if WEBHOOK:
         try:
             requests.post(WEBHOOK, json={"content": msg})
-        except:
-            print("Webhook failed")
+        except Exception as e:
+            print("Webhook error:", e)
 
-# ---------------- MLB SCHEDULE (FIXED) ----------------
+# ---------------- SCHEDULE ----------------
 def get_schedule():
     today = datetime.utcnow().strftime("%Y-%m-%d")
-
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate={today}&endDate={today}"
-
     data = requests.get(url).json()
 
     print("DATES COUNT:", len(data.get("dates", [])))
-
     return data
 
 def get_live(gamePk):
     url = f"https://statsapi.mlb.com/api/v1.1/game/{gamePk}/feed/live"
     return requests.get(url).json()
 
-# ---------------- TEAM MATCHING ----------------
+# ---------------- TEAM MATCH ----------------
 def normalize(name):
     return name.lower().replace(" ", "").replace(".", "")
 
@@ -61,7 +50,7 @@ def match_game(event, game):
 
     return home in event_home and away in event_away
 
-# ---------------- ODDS API ----------------
+# ---------------- ODDS ----------------
 def get_market_total(game):
     try:
         url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/"
@@ -71,7 +60,12 @@ def get_market_total(game):
             "markets": "totals"
         }
 
-        data = requests.get(url, params=params).json()
+        res = requests.get(url, params=params)
+        data = res.json()
+
+        if not isinstance(data, list):
+            print("Odds API returned error:", data)
+            return None
 
         totals = []
 
@@ -79,17 +73,17 @@ def get_market_total(game):
             if not match_game(event, game):
                 continue
 
-            for book in event["bookmakers"]:
-                for market in book["markets"]:
-                    if market["key"] == "totals":
-                        for outcome in market["outcomes"]:
-                            totals.append(outcome["point"])
+            for book in event.get("bookmakers", []):
+                for market in book.get("markets", []):
+                    if market.get("key") == "totals":
+                        for outcome in market.get("outcomes", []):
+                            if "point" in outcome:
+                                totals.append(outcome["point"])
 
         if not totals:
             return None
 
-        avg = round(sum(totals) / len(totals), 2)
-        return avg
+        return round(sum(totals) / len(totals), 2)
 
     except Exception as e:
         print("Odds API error:", e)
@@ -128,8 +122,8 @@ def projection(live):
     inning = linescore.get("currentInning", 1)
     outs = linescore.get("outs", 0)
 
-    home = linescore["teams"]["home"]["runs"]
-    away = linescore["teams"]["away"]["runs"]
+    home = linescore.get("teams", {}).get("home", {}).get("runs", 0)
+    away = linescore.get("teams", {}).get("away", {}).get("runs", 0)
 
     total = home + away
     innings_played = inning - 1 + (outs / 3)
@@ -139,7 +133,7 @@ def projection(live):
 
     proj = (total / innings_played) * 9
 
-    # runners
+    # runners on base
     offense = linescore.get("offense", {})
     runners = sum([1 for b in ["first", "second", "third"] if offense.get(b)])
     proj += runners * 0.3
@@ -157,10 +151,9 @@ def projection(live):
 
     proj += fatigue
 
-    # bullpen
+    # bullpen usage
     box = live["liveData"]["boxscore"]
     bullpen = len(box["teams"]["home"]["pitchers"]) > 1 or len(box["teams"]["away"]["pitchers"]) > 1
-
     if bullpen:
         proj += 0.5
 
@@ -199,6 +192,10 @@ def check():
             inning = linescore.get("currentInning", 0)
             outs = linescore.get("outs", 0)
 
+            # ⛔ skip pregame
+            if inning == 0:
+                continue
+
             print("\n------------------------")
             print("Game:", gamePk)
             print("Inning:", inning, "Outs:", outs)
@@ -215,7 +212,7 @@ def check():
             else:
                 print("EDGE: N/A")
 
-            # only inning break
+            # only inning breaks
             if inning < 4 or outs != 0:
                 continue
 
@@ -228,7 +225,7 @@ def check():
 
             movement = get_line_movement(gamePk, market)
 
-            # 🔥 lowered threshold so you SEE alerts
+            # 🔥 slightly loose threshold for testing
             if abs(edge) < 1.2:
                 continue
 
