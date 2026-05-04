@@ -43,32 +43,26 @@ def is_game_live(live):
         state = game.get("status", {}).get("abstractGameState")
         detailed = game.get("status", {}).get("detailedState")
 
-        # Official live
         if state == "Live":
             return True
 
-        # Score started
         teams = linescore.get("teams", {})
         if teams.get("home", {}).get("runs", 0) > 0:
             return True
         if teams.get("away", {}).get("runs", 0) > 0:
             return True
 
-        # Outs recorded
         if linescore.get("outs", 0) > 0:
             return True
 
-        # Pitcher present
         defense = linescore.get("defense", {})
         if defense.get("pitcher"):
             return True
 
-        # Batter present
         offense = linescore.get("offense", {})
         if offense.get("batter"):
             return True
 
-        # Fallback detailed state
         if detailed in ["In Progress", "Review", "Manager Challenge"]:
             return True
 
@@ -166,12 +160,10 @@ def projection(live):
 
     proj = (total / innings_played) * 9
 
-    # runners
     offense = linescore.get("offense", {})
     runners = sum([1 for b in ["first", "second", "third"] if offense.get(b)])
     proj += runners * 0.3
 
-    # fatigue
     pitch_count = get_pitch_count(live)
     if pitch_count >= 100:
         proj += 1.2
@@ -180,13 +172,11 @@ def projection(live):
     elif pitch_count >= 75:
         proj += 0.5
 
-    # bullpen
     box = live["liveData"]["boxscore"]
     bullpen = len(box["teams"]["home"]["pitchers"]) > 1 or len(box["teams"]["away"]["pitchers"]) > 1
     if bullpen:
         proj += 0.5
 
-    # leverage
     diff = abs(home - away)
     if inning >= 7:
         proj += 0.6
@@ -223,33 +213,33 @@ def check():
 
             print(f"Game {gamePk} | {game_state} | {detailed} | Inning {inning} | Outs {outs}")
 
-            # FAST live detection
             if not is_game_live(live):
                 continue
 
-            # wait for some gameplay
             if inning < 1:
                 continue
 
-            # inning break only
-            if outs != 0:
+            # 🔥 loosened condition
+            if outs not in [0, 2]:
                 continue
 
             market = get_market_total(game)
+            print("MARKET:", market)
+
             if market is None:
                 continue
 
             model = projection(live)
             edge = round(model - market, 2)
 
-            print(f"MARKET: {market} | MODEL: {model} | EDGE: {edge}")
+            print(f"MODEL: {model} | EDGE: {edge}")
 
             key = f"{gamePk}-{inning}"
             if key in alerted:
                 continue
 
-            # edge filter
-            if abs(edge) < 1.2:
+            # 🔥 loosened threshold
+            if abs(edge) < 0.5:
                 continue
 
             movement = get_line_movement(gamePk, market)
@@ -264,7 +254,7 @@ def check():
             send(
                 f"🚨 LIVE TOTAL EDGE ({bet})\n"
                 f"{away} vs {home}\n"
-                f"End {inning}\n\n"
+                f"Inning {inning}\n\n"
                 f"Model: {model}\n"
                 f"Market: {market}\n"
                 f"Edge: {edge}\n"
