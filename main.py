@@ -17,11 +17,17 @@ def send(msg):
         except:
             print("Webhook failed")
 
-# ---------------- MLB ----------------
+# ---------------- MLB SCHEDULE (FIXED) ----------------
 def get_schedule():
-    today = datetime.now().strftime("%Y-%m-%d")
-    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}"
-    return requests.get(url).json()
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+
+    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate={today}&endDate={today}"
+
+    data = requests.get(url).json()
+
+    print("DATES COUNT:", len(data.get("dates", [])))
+
+    return data
 
 def get_live(gamePk):
     url = f"https://statsapi.mlb.com/api/v1.1/game/{gamePk}/feed/live"
@@ -40,7 +46,7 @@ def match_game(event, game):
 
     return home in event_home and away in event_away
 
-# ---------------- ODDS ----------------
+# ---------------- ODDS API ----------------
 def get_market_total(game):
     try:
         url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/"
@@ -67,7 +73,8 @@ def get_market_total(game):
         if not totals:
             return None
 
-        return round(sum(totals) / len(totals), 2)
+        avg = round(sum(totals) / len(totals), 2)
+        return avg
 
     except Exception as e:
         print("Odds API error:", e)
@@ -83,7 +90,7 @@ def get_line_movement(gamePk, current):
 
     return round(current - prev, 2)
 
-# ---------------- PITCH DATA ----------------
+# ---------------- PITCH COUNT ----------------
 def get_pitch_count(live):
     try:
         box = live["liveData"]["boxscore"]
@@ -101,7 +108,6 @@ def get_pitch_count(live):
 
 # ---------------- MODEL ----------------
 def projection(live):
-
     linescore = live["liveData"]["linescore"]
 
     inning = linescore.get("currentInning", 1)
@@ -118,7 +124,7 @@ def projection(live):
 
     proj = (total / innings_played) * 9
 
-    # runners on base
+    # runners
     offense = linescore.get("offense", {})
     runners = sum([1 for b in ["first", "second", "third"] if offense.get(b)])
     proj += runners * 0.3
@@ -132,12 +138,6 @@ def projection(live):
     elif pitch_count >= 90:
         fatigue += 0.8
     elif pitch_count >= 75:
-        fatigue += 0.5
-
-    if inning <= 5 and pitch_count >= 80:
-        fatigue += 0.5
-
-    if runners >= 2 and pitch_count >= 85:
         fatigue += 0.5
 
     proj += fatigue
@@ -168,6 +168,9 @@ def check():
     schedule = get_schedule()
 
     for d in schedule.get("dates", []):
+        print("DATE:", d.get("date"))
+        print("GAMES FOUND:", len(d.get("games", [])))
+
         for game in d.get("games", []):
 
             gamePk = game["gamePk"]
@@ -181,7 +184,6 @@ def check():
             inning = linescore.get("currentInning", 0)
             outs = linescore.get("outs", 0)
 
-            # 🔥 DEBUG
             print("\n------------------------")
             print("Game:", gamePk)
             print("Inning:", inning, "Outs:", outs)
@@ -198,7 +200,7 @@ def check():
             else:
                 print("EDGE: N/A")
 
-            # only inning break spots
+            # only inning break
             if inning < 4 or outs != 0:
                 continue
 
@@ -211,7 +213,7 @@ def check():
 
             movement = get_line_movement(gamePk, market)
 
-            # 🔥 loosened threshold for testing
+            # 🔥 lowered threshold so you SEE alerts
             if abs(edge) < 1.2:
                 continue
 
