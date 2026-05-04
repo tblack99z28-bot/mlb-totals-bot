@@ -106,8 +106,11 @@ def get_line_movement(gamePk, current):
 def get_pitch_count(live):
     try:
         box = live["liveData"]["boxscore"]
-        defense = live["liveData"]["linescore"]["defense"]
-        pid = defense["pitcher"]["id"]
+        defense = live["liveData"]["linescore"].get("defense", {})
+        pid = defense.get("pitcher", {}).get("id")
+
+        if not pid:
+            return 0
 
         for t in ["home", "away"]:
             players = box["teams"][t]["players"]
@@ -193,33 +196,37 @@ def check():
             except:
                 continue
 
+            # 🔥 REAL GAME STATE
+            game_state = live.get("gameData", {}).get("status", {}).get("abstractGameState")
+            detailed_state = live.get("gameData", {}).get("status", {}).get("detailedState")
+
             inning = linescore.get("currentInning", 0)
             outs = linescore.get("outs", 0)
 
-            # 🔥 DEBUG EVERY GAME
-            print("Game:", gamePk, "Inning:", inning, "Outs:", outs)
+            print(f"Game: {gamePk} | State: {game_state} | Detail: {detailed_state} | Inning: {inning} Outs: {outs}")
 
-            # ⛔ skip pregame
-            if inning < 1:
+            # 🔥 CATCH EARLY (Preview + Live)
+            if game_state not in ["Live", "Preview"]:
                 continue
-
-            print("\n------------------------")
 
             market = get_market_total(game)
             print("MARKET:", market)
 
+            if market is None:
+                continue
+
             model, fatigue = projection(live)
             print("MODEL:", model)
 
-            if market:
-                edge = round(model - market, 2)
-                print("EDGE:", edge)
-            else:
-                print("EDGE: N/A")
+            edge = round(model - market, 2)
+            print("EDGE:", edge)
+
+            # 🔥 wait until at least some game flow exists
+            if inning < 2:
                 continue
 
-            # 🔥 loosened for testing
-            if inning < 2 or outs != 0:
+            # inning break only
+            if outs != 0:
                 continue
 
             key = f"{gamePk}-{inning}"
