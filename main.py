@@ -42,13 +42,16 @@ def normalize(name):
     return name.lower().replace(" ", "").replace(".", "")
 
 def match_game(event, game):
-    home = normalize(game["teams"]["home"]["team"]["name"])
-    away = normalize(game["teams"]["away"]["team"]["name"])
+    try:
+        home = normalize(game["teams"]["home"]["team"]["name"])
+        away = normalize(game["teams"]["away"]["team"]["name"])
 
-    event_home = normalize(event["home_team"])
-    event_away = normalize(event["away_team"])
+        event_home = normalize(event["home_team"])
+        event_away = normalize(event["away_team"])
 
-    return home in event_home and away in event_away
+        return home in event_home and away in event_away
+    except:
+        return False
 
 # ---------------- ODDS ----------------
 def get_market_total(game):
@@ -133,7 +136,7 @@ def projection(live):
 
     proj = (total / innings_played) * 9
 
-    # runners on base
+    # runners
     offense = linescore.get("offense", {})
     runners = sum([1 for b in ["first", "second", "third"] if offense.get(b)])
     proj += runners * 0.3
@@ -151,9 +154,10 @@ def projection(live):
 
     proj += fatigue
 
-    # bullpen usage
+    # bullpen
     box = live["liveData"]["boxscore"]
     bullpen = len(box["teams"]["home"]["pitchers"]) > 1 or len(box["teams"]["away"]["pitchers"]) > 1
+
     if bullpen:
         proj += 0.5
 
@@ -192,13 +196,14 @@ def check():
             inning = linescore.get("currentInning", 0)
             outs = linescore.get("outs", 0)
 
+            # 🔥 DEBUG EVERY GAME
+            print("Game:", gamePk, "Inning:", inning, "Outs:", outs)
+
             # ⛔ skip pregame
-            if inning == 0:
+            if inning < 1:
                 continue
 
             print("\n------------------------")
-            print("Game:", gamePk)
-            print("Inning:", inning, "Outs:", outs)
 
             market = get_market_total(game)
             print("MARKET:", market)
@@ -211,25 +216,22 @@ def check():
                 print("EDGE:", edge)
             else:
                 print("EDGE: N/A")
+                continue
 
-            # only inning breaks
-            if inning < 4 or outs != 0:
+            # 🔥 loosened for testing
+            if inning < 2 or outs != 0:
                 continue
 
             key = f"{gamePk}-{inning}"
             if key in alerted:
                 continue
 
-            if market is None:
-                continue
-
             movement = get_line_movement(gamePk, market)
 
-            # 🔥 slightly loose threshold for testing
-            if abs(edge) < 1.2:
+            if abs(edge) < 1.0:
                 continue
 
-            if abs(movement) > 1:
+            if abs(movement) > 1.5:
                 continue
 
             home = game["teams"]["home"]["team"]["name"]
@@ -240,7 +242,7 @@ def check():
             send(
                 f"🚨 LIVE TOTAL EDGE ({bet})\n"
                 f"{away} vs {home}\n"
-                f"End {inning}\n\n"
+                f"Inning {inning}\n\n"
                 f"Model: {model}\n"
                 f"Market: {market}\n"
                 f"Edge: {edge}\n"
