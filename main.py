@@ -1,3 +1,18 @@
+print("🚀 BOT STARTING...")
+
+import requests
+import time
+from datetime import datetime
+import os
+
+print("✅ Imports loaded")
+
+WEBHOOK = os.getenv("DISCORD_WEBHOOK")
+ODDS_API_KEY = os.getenv("ODDS_API_KEY")
+
+print("WEBHOOK:", "SET" if WEBHOOK else "MISSING")
+print("ODDS API:", "SET" if ODDS_API_KEY else "MISSING")
+
 import requests
 import time
 from datetime import datetime
