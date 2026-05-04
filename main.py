@@ -34,26 +34,42 @@ def get_live(gamePk):
     url = f"https://statsapi.mlb.com/api/v1.1/game/{gamePk}/feed/live"
     return requests.get(url).json()
 
-# ---------------- SMART LIVE DETECTION ----------------
+# ---------------- FAST LIVE DETECTION ----------------
 def is_game_live(live):
     try:
-        state = live.get("gameData", {}).get("status", {}).get("abstractGameState")
+        game = live.get("gameData", {})
+        linescore = live.get("liveData", {}).get("linescore", {})
 
+        state = game.get("status", {}).get("abstractGameState")
+        detailed = game.get("status", {}).get("detailedState")
+
+        # Official live
         if state == "Live":
             return True
 
-        linescore = live.get("liveData", {}).get("linescore", {})
+        # Score started
+        teams = linescore.get("teams", {})
+        if teams.get("home", {}).get("runs", 0) > 0:
+            return True
+        if teams.get("away", {}).get("runs", 0) > 0:
+            return True
 
-        # gameplay signals
+        # Outs recorded
         if linescore.get("outs", 0) > 0:
             return True
 
-        offense = linescore.get("offense", {})
-        if any(offense.get(base) for base in ["first", "second", "third"]):
-            return True
-
+        # Pitcher present
         defense = linescore.get("defense", {})
         if defense.get("pitcher"):
+            return True
+
+        # Batter present
+        offense = linescore.get("offense", {})
+        if offense.get("batter"):
+            return True
+
+        # Fallback detailed state
+        if detailed in ["In Progress", "Review", "Manager Challenge"]:
             return True
 
     except:
@@ -99,7 +115,8 @@ def get_market_total(game):
 
         return round(sum(totals) / len(totals), 2)
 
-    except:
+    except Exception as e:
+        print("Odds error:", e)
         return None
 
 # ---------------- LINE MOVEMENT ----------------
@@ -149,7 +166,7 @@ def projection(live):
 
     proj = (total / innings_played) * 9
 
-    # runners on base
+    # runners
     offense = linescore.get("offense", {})
     runners = sum([1 for b in ["first", "second", "third"] if offense.get(b)])
     proj += runners * 0.3
@@ -163,7 +180,7 @@ def projection(live):
     elif pitch_count >= 75:
         proj += 0.5
 
-    # bullpen usage
+    # bullpen
     box = live["liveData"]["boxscore"]
     bullpen = len(box["teams"]["home"]["pitchers"]) > 1 or len(box["teams"]["away"]["pitchers"]) > 1
     if bullpen:
@@ -183,7 +200,6 @@ def projection(live):
 
 # ---------------- MAIN ----------------
 def check():
-
     schedule = get_schedule()
 
     for d in schedule.get("dates", []):
@@ -200,17 +216,19 @@ def check():
                 continue
 
             game_state = live.get("gameData", {}).get("status", {}).get("abstractGameState")
+            detailed = live.get("gameData", {}).get("status", {}).get("detailedState")
+
             inning = linescore.get("currentInning", 0)
             outs = linescore.get("outs", 0)
 
-            print(f"Game {gamePk} | State: {game_state} | Inning: {inning} | Outs: {outs}")
+            print(f"Game {gamePk} | {game_state} | {detailed} | Inning {inning} | Outs {outs}")
 
-            # 🔥 SMART LIVE CHECK
+            # FAST live detection
             if not is_game_live(live):
                 continue
 
-            # wait for meaningful game state
-            if inning < 2:
+            # wait for some gameplay
+            if inning < 1:
                 continue
 
             # inning break only
@@ -230,11 +248,10 @@ def check():
             if key in alerted:
                 continue
 
-            # 🔥 sharp threshold
-            if abs(edge) < 1.5:
+            # edge filter
+            if abs(edge) < 1.2:
                 continue
 
-            # avoid chasing big moves
             movement = get_line_movement(gamePk, market)
             if abs(movement) > 1.5:
                 continue
