@@ -16,6 +16,10 @@ print("ODDS API:", "SET" if ODDS_API_KEY else "MISSING")
 alerted = set()
 last_totals = {}
 
+# 🔥 NEW: odds cache (prevents quota burn)
+odds_cache = {}
+odds_last_fetch = 0
+
 # ---------------- DISCORD ----------------
 def send(msg):
     if WEBHOOK:
@@ -50,21 +54,19 @@ def is_game_live(live):
         if state == "Live":
             return True
 
-        teams = linescore.get("teams", {})
-        if teams.get("home", {}).get("runs", 0) > 0:
-            return True
-        if teams.get("away", {}).get("runs", 0) > 0:
-            return True
-
         if linescore.get("outs", 0) > 0:
             return True
 
-        defense = linescore.get("defense", {})
-        if defense.get("pitcher"):
+        if linescore.get("teams", {}).get("home", {}).get("runs", 0) > 0:
             return True
 
-        offense = linescore.get("offense", {})
-        if offense.get("batter"):
+        if linescore.get("teams", {}).get("away", {}).get("runs", 0) > 0:
+            return True
+
+        if linescore.get("defense", {}).get("pitcher"):
+            return True
+
+        if linescore.get("offense", {}).get("batter"):
             return True
 
         if detailed in ["In Progress", "Review", "Manager Challenge"]:
@@ -75,8 +77,13 @@ def is_game_live(live):
 
     return False
 
-# ---------------- ODDS (FIXED MATCHING) ----------------
-def get_market_total(game):
+# ---------------- ODDS FETCH (1 CALL ONLY) ----------------
+def fetch_all_odds():
+    global odds_cache, odds_last_fetch
+
+    if time.time() - odds_last_fetch < 60:
+        return odds_cache
+
     try:
         url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/"
         params = {
@@ -88,39 +95,53 @@ def get_market_total(game):
         data = requests.get(url, params=params).json()
 
         if not isinstance(data, list):
-            print("ODDS BAD RESPONSE:", data)
-            return None
+            print("ODDS ERROR:", data)
+            return odds_cache
 
-        home = normalize(game["teams"]["home"]["team"]["name"])
-        away = normalize(game["teams"]["away"]["team"]["name"])
+        new_cache = {}
 
         for event in data:
-            event_home = normalize(event.get("home_team", ""))
-            event_away = normalize(event.get("away_team", ""))
+            home = normalize(event.get("home_team", ""))
+            away = normalize(event.get("away_team", ""))
 
-            if (home in event_home or event_home in home) and \
-               (away in event_away or event_away in away):
+            totals = []
 
-                totals = []
+            for book in event.get("bookmakers", []):
+                for market in book.get("markets", []):
+                    if market.get("key") == "totals":
+                        for outcome in market.get("outcomes", []):
+                            if "point" in outcome:
+                                totals.append(outcome["point"])
 
-                for book in event.get("bookmakers", []):
-                    for market in book.get("markets", []):
-                        if market.get("key") == "totals":
-                            for outcome in market.get("outcomes", []):
-                                if "point" in outcome:
-                                    totals.append(outcome["point"])
+            if totals:
+                avg = round(sum(totals) / len(totals), 2)
+                key = f"{home}-{away}"
+                new_cache[key] = avg
 
-                if totals:
-                    avg = round(sum(totals) / len(totals), 2)
-                    print(f"✅ MATCHED ODDS: {avg}")
-                    return avg
+        odds_cache = new_cache
+        odds_last_fetch = time.time()
 
-        print("❌ NO MATCH:", home, "vs", away)
-        return None
+        print("✅ ODDS UPDATED:", len(odds_cache), "games")
 
     except Exception as e:
-        print("Odds error:", e)
-        return None
+        print("Odds fetch error:", e)
+
+    return odds_cache
+
+# ---------------- GET MARKET ----------------
+def get_market_total(game):
+    odds = fetch_all_odds()
+
+    home = normalize(game["teams"]["home"]["team"]["name"])
+    away = normalize(game["teams"]["away"]["team"]["name"])
+
+    key = f"{home}-{away}"
+
+    if key in odds:
+        return odds[key]
+
+    print("❌ NO MATCH:", home, "vs", away)
+    return None
 
 # ---------------- LINE MOVEMENT ----------------
 def get_line_movement(gamePk, current):
@@ -169,8 +190,8 @@ def projection(live):
 
     proj = (total / innings_played) * 9
 
-    offense = linescore.get("offense", {})
-    runners = sum([1 for b in ["first", "second", "third"] if offense.get(b)])
+    runners = sum([1 for b in ["first", "second", "third"]
+                   if linescore.get("offense", {}).get(b)])
     proj += runners * 0.3
 
     pitch_count = get_pitch_count(live)
@@ -205,7 +226,6 @@ def check():
         print("DATE:", d.get("date"), "| Games:", len(d.get("games", [])))
 
         for game in d.get("games", []):
-
             gamePk = game["gamePk"]
 
             try:
