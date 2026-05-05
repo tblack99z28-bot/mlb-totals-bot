@@ -56,26 +56,22 @@ def get_live(gamePk):
     url = f"https://statsapi.mlb.com/api/v1.1/game/{gamePk}/feed/live"
     return requests.get(url).json()
 
-# ---------------- LIVE DETECTION ----------------
+# ---------------- FIXED LIVE DETECTION ----------------
 def is_game_live(live):
     try:
-        game = live.get("gameData", {})
-        linescore = live.get("liveData", {}).get("linescore", {})
-
-        state = game.get("status", {}).get("abstractGameState")
-        detailed = game.get("status", {}).get("detailedState")
+        status = live.get("gameData", {}).get("status", {})
+        state = status.get("abstractGameState", "")
+        detailed = status.get("detailedState", "")
 
         if state == "Live":
             return True
-        if detailed in ["In Progress", "Review"]:
+
+        if detailed in ["In Progress", "Manager Challenge", "Review"]:
             return True
-        if linescore.get("outs", 0) > 0:
-            return True
-        if linescore.get("teams", {}).get("home", {}).get("runs", 0) > 0:
-            return True
-        if linescore.get("teams", {}).get("away", {}).get("runs", 0) > 0:
-            return True
-        if linescore.get("offense", {}).get("batter"):
+
+        # 🔥 fallback: inning started
+        linescore = live.get("liveData", {}).get("linescore", {})
+        if linescore.get("currentInning", 0) >= 1:
             return True
 
     except:
@@ -192,11 +188,13 @@ def check():
             except:
                 continue
 
-            # 🔥 ONLY process LIVE games
+            # DEBUG (temporary)
+            status = live.get("gameData", {}).get("status", {})
+            print("DEBUG:", status.get("abstractGameState"), "|", status.get("detailedState"))
+
             if not is_game_live(live):
                 continue
 
-            status = live.get("gameData", {}).get("status", {})
             state = "LIVE"
             detailed = status.get("detailedState")
 
