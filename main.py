@@ -16,8 +16,8 @@ def send(msg):
     if WEBHOOK:
         try:
             requests.post(WEBHOOK, json={"content": msg})
-        except Exception as e:
-            print("Webhook error:", e)
+        except:
+            pass
 
 # ---------------- SCHEDULE ----------------
 def get_games():
@@ -25,25 +25,26 @@ def get_games():
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}"
     return requests.get(url).json()
 
-# ---------------- 🔥 FIXED LIVE FEED (CACHE BUSTER) ----------------
 def get_live(gamePk):
-    ts = int(time.time())  # 🔥 prevents caching
-
+    ts = int(time.time())
     url = f"https://statsapi.mlb.com/api/v1.1/game/{gamePk}/feed/live?_={ts}"
+    return requests.get(url).json()
 
-    headers = {
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache"
-    }
-
-    return requests.get(url, headers=headers).json()
-
-# ---------------- 🔥 TRUE LIVE DETECTION ----------------
-def is_live(live):
+# ---------------- 🔥 LIVE DETECTION (NO PLAYS) ----------------
+def is_live(linescore):
     try:
-        plays = live.get("liveData", {}).get("plays", {}).get("allPlays", [])
+        inning = linescore.get("currentInning", 0)
+        outs = linescore.get("outs", 0)
 
-        if len(plays) > 0:
+        home = linescore.get("teams", {}).get("home", {}).get("runs", 0)
+        away = linescore.get("teams", {}).get("away", {}).get("runs", 0)
+
+        # 🔥 ANY REAL GAME SIGNAL
+        if inning >= 1:
+            return True
+        if outs > 0:
+            return True
+        if home > 0 or away > 0:
             return True
 
     except:
@@ -52,9 +53,7 @@ def is_live(live):
     return False
 
 # ---------------- MODEL ----------------
-def projection(live):
-    linescore = live["liveData"]["linescore"]
-
+def projection(linescore):
     inning = linescore.get("currentInning", 1)
     outs = linescore.get("outs", 0)
 
@@ -81,21 +80,17 @@ def check():
 
             try:
                 live = get_live(gamePk)
+                linescore = live.get("liveData", {}).get("linescore", {})
             except:
                 continue
 
-            # 🔥 DEBUG: check plays
-            plays = live.get("liveData", {}).get("plays", {}).get("allPlays", [])
-            if len(plays) > 0:
-                print(f"🔥 Game {gamePk} LIVE | Plays: {len(plays)}")
-
-            if not is_live(live):
-                continue
-
-            linescore = live["liveData"]["linescore"]
-
             inning = linescore.get("currentInning", 0)
             outs = linescore.get("outs", 0)
+
+            print(f"Game {gamePk} | Inning {inning} | Outs {outs}")
+
+            if not is_live(linescore):
+                continue
 
             print(f"🔥 LIVE GAME: {gamePk} | Inning {inning} | Outs {outs}")
 
@@ -105,7 +100,7 @@ def check():
             if outs not in [0, 2]:
                 continue
 
-            model = projection(live)
+            model = projection(linescore)
             print("MODEL:", model)
 
             key = f"{gamePk}-{inning}"
