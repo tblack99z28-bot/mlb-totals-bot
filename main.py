@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (TRUE FINAL BUILD) STARTING...")
+print("🚀 SHARP+ BOT (STABLE - NO FAKE MOVEMENT) STARTING...")
 
 import requests
 import time
@@ -117,16 +117,15 @@ def check():
             print(f"\n{away} vs {home}")
             print(f"Runs: {runs} | Outs: {outs}")
 
-            # 🔥 estimated game progress
+            # 🔥 estimated progress
             progress = (outs / 3) + (runs * 0.6)
             print("Progress:", round(progress, 2))
 
-            # 🔥 early filter
+            # 🔥 early filters
             if progress < 3.0:
                 print("⏭️ Too early")
                 continue
 
-            # 🔥 early scoring trap filter
             if runs >= 6 and progress < 5:
                 print("⏭️ Early scoring spike trap")
                 continue
@@ -150,7 +149,7 @@ def check():
 
             game_id = f"{home}-{away}"
 
-            # 🔥 movement tracking (LONG WINDOW)
+            # 🔥 still track movement, but don't rely on it
             history = last_markets.get(game_id, [])
             history.append(market)
 
@@ -163,9 +162,6 @@ def check():
             if len(history) >= 3:
                 movement = round(market - history[0], 2)
 
-            if abs(movement) < 0.5:
-                movement = 0
-
             print("Movement:", movement)
 
             key = f"{game_id}-{int(progress)}"
@@ -174,28 +170,24 @@ def check():
                 print("⏭️ Already alerted")
                 continue
 
-            # 🔥 strong edge filter
+            # 🔥 strong edge requirement
             if abs(edge) < 2.0:
                 print("⏭️ Edge too small")
                 continue
 
+            # 🔥 ONLY use movement to avoid extreme late steam
+            if abs(movement) >= 1.5:
+                print("⏭️ Large market move - avoid")
+                continue
+
             bet = "OVER" if edge > 0 else "UNDER"
-
-            # 🔥 TRAP FILTER
-            if bet == "OVER" and movement > 0:
-                print("⏭️ Trap: line rising on OVER")
-                continue
-
-            if bet == "UNDER" and movement < 0:
-                print("⏭️ Trap: line dropping on UNDER")
-                continue
 
             print("🚨 SIGNAL:", bet)
 
             send(
                 f"🚨 LIVE TOTAL ({bet})\n"
                 f"{away} vs {home}\n\n"
-                f"Runs: {runs}\nMarket: {market}\nModel: {model}\nEdge: {edge}\nMovement: {movement}"
+                f"Runs: {runs}\nMarket: {market}\nModel: {model}\nEdge: {edge}"
             )
 
             alerted.add(key)
