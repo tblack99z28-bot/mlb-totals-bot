@@ -1,4 +1,4 @@
-print("🚀 SHARP+ FIXED BOT STARTING...")
+print("🚀 SHARP+ BOT (ESTIMATED PROGRESS) STARTING...")
 
 import requests
 import time
@@ -21,56 +21,13 @@ def send(msg):
         except:
             pass
 
-# ---------------- ESPN (FIXED) ----------------
+# ---------------- ESPN ----------------
 def get_espn_games():
-    base = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
-
+    url = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
     try:
-        data = requests.get(base).json()
-        events = data.get("events", [])
+        return requests.get(url).json().get("events", [])
     except:
         return []
-
-    games = []
-
-    for e in events:
-        game_id = e["id"]
-
-        try:
-            summary_url = f"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/summary?event={game_id}"
-            summary = requests.get(summary_url).json()
-        except:
-            continue
-
-        try:
-            comp = summary["header"]["competitions"][0]
-            teams = comp["competitors"]
-
-            home = teams[0]["team"]["displayName"]
-            away = teams[1]["team"]["displayName"]
-
-            home_score = int(teams[0]["score"])
-            away_score = int(teams[1]["score"])
-
-            situation = summary.get("situation", {})
-
-            inning = situation.get("inning", 1)
-            half = situation.get("halfInning", "top")
-            outs = situation.get("outs", 0)
-
-            games.append({
-                "home": home,
-                "away": away,
-                "runs": home_score + away_score,
-                "inning": inning,
-                "half": half,
-                "outs": outs
-            })
-
-        except:
-            continue
-
-    return games
 
 # ---------------- ODDS ----------------
 def get_odds():
@@ -114,25 +71,20 @@ def find_market(home, away, odds):
     return None
 
 # ---------------- MODEL ----------------
-def project_total(runs, inning, half, outs):
+def project_total(runs, progress):
     BASELINE = 8.8
 
-    innings = inning - 1
-    if half == "bottom":
-        innings += 0.5
-    innings += outs / 3
-
-    if innings < 2:
+    if progress < 2:
         return BASELINE
 
-    pace = runs / innings
+    pace = runs / progress
     raw = pace * 9
 
-    if innings < 4:
+    if progress < 4:
         w = 0.25
-    elif innings < 6:
+    elif progress < 6:
         w = 0.5
-    elif innings < 8:
+    elif progress < 8:
         w = 0.7
     else:
         w = 0.85
@@ -140,47 +92,45 @@ def project_total(runs, inning, half, outs):
     proj = (raw * w) + (BASELINE * (1 - w))
     proj = max(3, min(15, proj))
 
-    if inning >= 7:
+    if progress >= 7:
         proj += 0.4
-    elif inning >= 5:
+    elif progress >= 5:
         proj += 0.2
 
     return round(proj, 2)
 
 # ---------------- MAIN ----------------
 def check():
-    games = get_espn_games()
+    espn_games = get_espn_games()
     odds = get_odds()
 
-    print("Games:", len(games), "| Odds:", len(odds))
+    print("Games:", len(espn_games), "| Odds:", len(odds))
 
-    for g in games:
+    for g in espn_games:
         try:
-            home = g["home"]
-            away = g["away"]
-            runs = g["runs"]
-            inning = g["inning"]
-            half = g["half"]
-            outs = g["outs"]
+            comp = g["competitions"][0]
+            teams = comp["competitors"]
+
+            home = teams[0]["team"]["displayName"]
+            away = teams[1]["team"]["displayName"]
+
+            home_score = int(teams[0]["score"])
+            away_score = int(teams[1]["score"])
+            runs = home_score + away_score
+
+            situation = comp.get("situation", {})
+            outs = situation.get("outs", 0)
 
             print(f"\n{away} vs {home}")
-            print(f"Runs: {runs} | Inning: {inning} {half} | Outs: {outs}")
+            print(f"Runs: {runs} | Outs: {outs}")
 
-            # innings calc
-            innings = inning - 1
-            if half == "bottom":
-                innings += 0.5
-            innings += outs / 3
+            # 🔥 ESTIMATED GAME PROGRESS (NO INNING)
+            progress = (outs / 3) + (runs * 0.6)
 
-            print("Innings calc:", round(innings, 2))
+            print("Estimated progress:", round(progress, 2))
 
-            # 🔥 live filter
-            if inning == 1 and outs == 0 and runs == 0:
-                print("⏭️ Not started")
-                continue
-
-            # 🔥 early filter
-            if innings < 1.0:
+            # 🔥 FILTER EARLY GAME
+            if progress < 2:
                 print("⏭️ Too early")
                 continue
 
@@ -196,7 +146,7 @@ def check():
                 print("⏭️ Bad market")
                 continue
 
-            model = project_total(runs, inning, half, outs)
+            model = project_total(runs, progress)
             edge = round(model - market, 2)
 
             print("Model:", model, "| Edge:", edge)
@@ -212,13 +162,14 @@ def check():
 
             print("Movement:", movement)
 
-            key = f"{game_id}-{inning}"
+            key = f"{game_id}-{int(progress)}"
 
             if key in alerted:
                 print("⏭️ Already alerted")
                 continue
 
-            if abs(edge) < 1.0:
+            # 🔥 EDGE FILTER
+            if abs(edge) < 1.2:
                 print("⏭️ Edge too small")
                 continue
 
@@ -228,8 +179,7 @@ def check():
 
             send(
                 f"🚨 LIVE TOTAL ({bet})\n"
-                f"{away} vs {home}\n"
-                f"Inning {inning}\n\n"
+                f"{away} vs {home}\n\n"
                 f"Runs: {runs}\nMarket: {market}\nModel: {model}\nEdge: {edge}"
             )
 
