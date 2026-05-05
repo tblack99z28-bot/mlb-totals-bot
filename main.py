@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (CLEAN FINAL - NO LOGIC LEAKS) STARTING...")
+print("🚀 SHARP+ BOT (STABLE FINAL FIXED) STARTING...")
 
 import requests
 import time
@@ -62,12 +62,20 @@ def find_market(home, away, odds):
         a = clean(game.get("away_team", ""))
 
         if home_c in h and away_c in a:
-            for book in game.get("bookmakers", []):
-                for market in book.get("markets", []):
-                    if market.get("key") == "totals":
-                        for o in market.get("outcomes", []):
-                            if "point" in o:
-                                return o["point"]
+
+            bookmakers = game.get("bookmakers", [])
+            if not bookmakers:
+                return None
+
+            # 🔥 USE FIRST BOOK ONLY (stable)
+            book = bookmakers[0]
+
+            for market in book.get("markets", []):
+                if market.get("key") == "totals":
+                    for o in market.get("outcomes", []):
+                        if "point" in o:
+                            return o["point"]
+
     return None
 
 # ---------------- MODEL ----------------
@@ -117,13 +125,12 @@ def check():
             print(f"\n{away} vs {home}")
             print(f"Runs: {runs} | Outs: {outs}")
 
-            # 🔥 estimated progress
+            # progress
             progress = (outs / 3) + (runs * 0.6)
             print("Progress:", round(progress, 2))
 
-            # 🔥 get market FIRST (so we can compute edge early)
+            # market
             market = find_market(home, away, odds)
-
             if market is None:
                 print("❌ No market match")
                 continue
@@ -135,15 +142,14 @@ def check():
                 print("⏭️ Bad market")
                 continue
 
-            # 🔥 model + edge
+            # model
             model = project_total(runs, progress)
             edge = round(model - market, 2)
-
             print("Model:", model, "| Edge:", edge)
 
             game_id = f"{home}-{away}"
 
-            # 🔥 track market history
+            # movement tracking (optional safety only)
             history = last_markets.get(game_id, [])
             history.append(market)
             if len(history) > 20:
@@ -159,38 +165,32 @@ def check():
             key = f"{game_id}-{int(progress)}"
 
             # ======================
-            # 🔥 ALL FILTERS FIRST
+            # 🔥 HARD FILTER BLOCK
             # ======================
+            skip_reason = None
 
-            # early game
             if progress < 3.0:
-                print("⏭️ Too early")
-                continue
+                skip_reason = "Too early"
 
-            # weak early spike
-            if runs >= 6 and progress < 5 and abs(edge) < 3:
-                print("⏭️ Weak early spike (no real edge)")
-                continue
+            elif runs >= 6 and progress < 5 and abs(edge) < 3:
+                skip_reason = "Weak early spike"
 
-            # edge strength
-            if abs(edge) < 2.2:
-                print("⏭️ Edge too small")
-                continue
+            elif abs(edge) < 2.2:
+                skip_reason = "Edge too small"
 
-            # large late movement
-            if abs(movement) >= 1.5:
-                print("⏭️ Large market move - avoid")
-                continue
+            elif abs(movement) >= 1.5:
+                skip_reason = "Large market move"
 
-            # already alerted
-            if key in alerted:
-                print("⏭️ Already alerted")
+            elif key in alerted:
+                skip_reason = "Already alerted"
+
+            if skip_reason:
+                print(f"⏭️ {skip_reason}")
                 continue
 
             # ======================
             # 🚨 SIGNAL (ONLY HERE)
             # ======================
-
             bet = "OVER" if edge > 0 else "UNDER"
 
             print("🚨 SIGNAL:", bet)
