@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (STABLE - NO FAKE MOVEMENT) STARTING...")
+print("🚀 SHARP+ BOT (BALANCED VERSION) STARTING...")
 
 import requests
 import time
@@ -126,12 +126,7 @@ def check():
                 print("⏭️ Too early")
                 continue
 
-            if runs >= 6 and progress < 5:
-                print("⏭️ Early scoring spike trap")
-                continue
-
             market = find_market(home, away, odds)
-
             if market is None:
                 print("❌ No market match")
                 continue
@@ -147,15 +142,18 @@ def check():
 
             print("Model:", model, "| Edge:", edge)
 
+            # 🔥 SMART early scoring filter (fixed)
+            if runs >= 6 and progress < 5 and edge < 3:
+                print("⏭️ Weak early spike (no real edge)")
+                continue
+
             game_id = f"{home}-{away}"
 
-            # 🔥 still track movement, but don't rely on it
+            # track market history (still useful)
             history = last_markets.get(game_id, [])
             history.append(market)
-
             if len(history) > 20:
                 history.pop(0)
-
             last_markets[game_id] = history
 
             movement = 0
@@ -170,12 +168,12 @@ def check():
                 print("⏭️ Already alerted")
                 continue
 
-            # 🔥 strong edge requirement
-            if abs(edge) < 2.0:
+            # 🔥 tighter edge filter
+            if abs(edge) < 2.2:
                 print("⏭️ Edge too small")
                 continue
 
-            # 🔥 ONLY use movement to avoid extreme late steam
+            # 🔥 only avoid extreme late movement
             if abs(movement) >= 1.5:
                 print("⏭️ Large market move - avoid")
                 continue
