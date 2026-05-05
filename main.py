@@ -1,4 +1,4 @@
-print("🚀 SPORTSBOOK BOT STARTING...")
+print("🚀 SHARP LIVE TOTALS BOT STARTING...")
 
 import requests
 import time
@@ -11,7 +11,6 @@ print("WEBHOOK:", "SET" if WEBHOOK else "MISSING")
 print("ODDS API:", "SET" if ODDS_API_KEY else "MISSING")
 
 alerted = set()
-last_scores = {}
 
 # ---------------- DISCORD ----------------
 def send(msg):
@@ -21,102 +20,142 @@ def send(msg):
         except:
             pass
 
-# ---------------- FETCH ODDS ----------------
+# ---------------- ESPN LIVE DATA ----------------
+def get_espn_games():
+    url = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
+    try:
+        data = requests.get(url).json()
+        return data.get("events", [])
+    except:
+        return []
+
+# ---------------- ODDS ----------------
 def get_odds():
     url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/"
-
     params = {
         "apiKey": ODDS_API_KEY,
         "regions": "us",
-        "markets": "totals",
-        "oddsFormat": "decimal"
+        "markets": "totals"
     }
 
     try:
         data = requests.get(url, params=params).json()
+        if isinstance(data, list):
+            return data
+    except:
+        pass
 
-        if not isinstance(data, list):
-            print("ODDS ERROR:", data)
-            return []
+    return []
 
-        return data
+# ---------------- TEAM MATCH ----------------
+def clean(name):
+    return name.lower().replace(" ", "")
 
-    except Exception as e:
-        print("Odds fetch error:", e)
-        return []
+def find_market(home, away, odds):
+    home = clean(home)
+    away = clean(away)
+
+    for game in odds:
+        h = clean(game.get("home_team", ""))
+        a = clean(game.get("away_team", ""))
+
+        if home in h and away in a:
+            for book in game.get("bookmakers", []):
+                for market in book.get("markets", []):
+                    if market.get("key") == "totals":
+                        for o in market.get("outcomes", []):
+                            if "point" in o:
+                                return o["point"]
+
+    return None
 
 # ---------------- MODEL ----------------
-def estimate_total(game, market_total):
-    game_id = game["id"]
+def project_total(runs, inning, half, outs):
+    # innings played (top/bottom adjustment)
+    innings = inning - 1
+    if half == "bottom":
+        innings += 0.5
 
-    # fake "progress" based on score change
-    home_score = game.get("scores", {}).get("home", 0)
-    away_score = game.get("scores", {}).get("away", 0)
+    innings += outs / 3
 
-    total_runs = home_score + away_score
+    if innings <= 0:
+        return runs
 
-    prev = last_scores.get(game_id, 0)
-    last_scores[game_id] = total_runs
+    # base pace
+    pace = runs / innings
+    proj = pace * 9
 
-    # 🔥 estimate pace
-    pace = total_runs - prev
+    # regression toward avg (8.8 baseline)
+    proj = (proj * 0.7) + (8.8 * 0.3)
 
-    # base projection
-    projection = market_total
+    # late game bump
+    if inning >= 7:
+        proj += 0.6
+    elif inning >= 5:
+        proj += 0.3
 
-    # adjust for scoring pace
-    projection += pace * 1.5
-
-    return round(projection, 2), total_runs
+    return round(proj, 2)
 
 # ---------------- MAIN ----------------
 def check():
-    games = get_odds()
+    espn_games = get_espn_games()
+    odds = get_odds()
 
-    print("Games pulled:", len(games))
+    print("Games:", len(espn_games))
 
-    for game in games:
-        home = game.get("home_team")
-        away = game.get("away_team")
+    for g in espn_games:
+        comp = g["competitions"][0]
+        teams = comp["competitors"]
 
-        bookmakers = game.get("bookmakers", [])
+        home = teams[0]["team"]["displayName"]
+        away = teams[1]["team"]["displayName"]
 
-        market_total = None
+        home_score = int(teams[0]["score"])
+        away_score = int(teams[1]["score"])
 
-        for book in bookmakers:
-            for market in book.get("markets", []):
-                if market.get("key") == "totals":
-                    for outcome in market.get("outcomes", []):
-                        if "point" in outcome:
-                            market_total = outcome["point"]
-                            break
+        runs = home_score + away_score
 
-        if market_total is None:
+        status = g["status"]["type"]["description"]
+
+        # only live games
+        if "In Progress" not in status:
             continue
 
-        model, runs = estimate_total(game, market_total)
+        situation = comp.get("situation", {})
+        inning = situation.get("inning", 1)
+        half = situation.get("halfInning", "top")
+        outs = situation.get("outs", 0)
 
-        edge = round(model - market_total, 2)
+        print(f"{away} vs {home} | {runs} runs | Inning {inning} {half} | Outs {outs}")
 
-        print(f"{away} vs {home}")
-        print("RUNS:", runs, "| MARKET:", market_total, "| MODEL:", model, "| EDGE:", edge)
+        market = find_market(home, away, odds)
 
-        key = f"{game['id']}"
+        if market is None:
+            print("No market found")
+            continue
+
+        model = project_total(runs, inning, half, outs)
+        edge = round(model - market, 2)
+
+        print("MARKET:", market, "MODEL:", model, "EDGE:", edge)
+
+        key = f"{home}-{away}-{inning}"
 
         if key in alerted:
             continue
 
-        # 🔥 thresholds
-        if abs(edge) < 0.7:
+        # 🔥 SHARP THRESHOLDS
+        if abs(edge) < 0.8:
             continue
 
         bet = "OVER" if edge > 0 else "UNDER"
 
         send(
             f"🚨 LIVE TOTAL EDGE ({bet})\n"
-            f"{away} vs {home}\n\n"
+            f"{away} vs {home}\n"
+            f"Inning {inning} {half}\n\n"
             f"Runs: {runs}\n"
-            f"Market: {market_total}\n"
+            f"Market: {market}\n"
             f"Model: {model}\n"
             f"Edge: {edge}"
         )
@@ -126,7 +165,7 @@ def check():
 # ---------------- LOOP ----------------
 while True:
     try:
-        print("\n=== Checking sportsbook data ===")
+        print("\n=== CHECKING LIVE MLB ===")
         check()
     except Exception as e:
         print("ERROR:", e)
