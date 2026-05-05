@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (FINAL FILTERED VERSION) STARTING...")
+print("🚀 SHARP+ BOT (MARKET-AWARE FINAL) STARTING...")
 
 import requests
 import time
@@ -70,11 +70,10 @@ def find_market(home, away, odds):
                                 return o["point"]
     return None
 
-# ---------------- SHARP MODEL ----------------
+# ---------------- MODEL ----------------
 def project_total(runs, progress):
     BASELINE = 8.8
 
-    # strong regression early
     if progress < 3:
         return round(BASELINE + (runs * 0.3), 2)
 
@@ -89,8 +88,6 @@ def project_total(runs, progress):
         w = 0.6
 
     proj = (raw * w) + (BASELINE * (1 - w))
-
-    # clamp realistic range
     proj = max(4, min(14, proj))
 
     return round(proj, 2)
@@ -124,8 +121,8 @@ def check():
             progress = (outs / 3) + (runs * 0.6)
             print("Progress:", round(progress, 2))
 
-            # early game filter
-            if progress < 2.5:
+            # 🔥 stronger early filter
+            if progress < 3.0:
                 print("⏭️ Too early")
                 continue
 
@@ -148,14 +145,21 @@ def check():
 
             game_id = f"{home}-{away}"
 
-            prev = last_markets.get(game_id)
-            movement = round(market - prev, 2) if prev else 0
+            # 🔥 movement tracking (history-based)
+            history = last_markets.get(game_id, [])
+            history.append(market)
 
-            # ignore tiny movement noise
-            if abs(movement) < 0.25:
+            if len(history) > 5:
+                history.pop(0)
+
+            last_markets[game_id] = history
+
+            movement = 0
+            if len(history) >= 2:
+                movement = round(history[-1] - history[0], 2)
+
+            if abs(movement) < 0.5:
                 movement = 0
-
-            last_markets[game_id] = market
 
             print("Movement:", movement)
 
@@ -165,14 +169,14 @@ def check():
                 print("⏭️ Already alerted")
                 continue
 
-            # 🔥 stronger edge requirement
+            # 🔥 stronger edge filter
             if abs(edge) < 2.0:
                 print("⏭️ Edge too small")
                 continue
 
             bet = "OVER" if edge > 0 else "UNDER"
 
-            # 🔥 SHARP TRAP FILTER
+            # 🔥 trap filter
             if bet == "OVER" and movement > 0:
                 print("⏭️ Trap: line rising on OVER")
                 continue
