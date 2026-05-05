@@ -1,4 +1,4 @@
-print("🚀 SHARP+ DEBUG BOT STARTING...")
+print("🚀 SHARP+ FIXED BOT STARTING...")
 
 import requests
 import time
@@ -21,13 +21,56 @@ def send(msg):
         except:
             pass
 
-# ---------------- ESPN ----------------
+# ---------------- ESPN (FIXED) ----------------
 def get_espn_games():
-    url = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
+    base = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
+
     try:
-        return requests.get(url).json().get("events", [])
+        data = requests.get(base).json()
+        events = data.get("events", [])
     except:
         return []
+
+    games = []
+
+    for e in events:
+        game_id = e["id"]
+
+        try:
+            summary_url = f"https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/summary?event={game_id}"
+            summary = requests.get(summary_url).json()
+        except:
+            continue
+
+        try:
+            comp = summary["header"]["competitions"][0]
+            teams = comp["competitors"]
+
+            home = teams[0]["team"]["displayName"]
+            away = teams[1]["team"]["displayName"]
+
+            home_score = int(teams[0]["score"])
+            away_score = int(teams[1]["score"])
+
+            situation = summary.get("situation", {})
+
+            inning = situation.get("inning", 1)
+            half = situation.get("halfInning", "top")
+            outs = situation.get("outs", 0)
+
+            games.append({
+                "home": home,
+                "away": away,
+                "runs": home_score + away_score,
+                "inning": inning,
+                "half": half,
+                "outs": outs
+            })
+
+        except:
+            continue
+
+    return games
 
 # ---------------- ODDS ----------------
 def get_odds():
@@ -106,44 +149,24 @@ def project_total(runs, inning, half, outs):
 
 # ---------------- MAIN ----------------
 def check():
-    espn_games = get_espn_games()
+    games = get_espn_games()
     odds = get_odds()
 
-    print("ESPN Games:", len(espn_games))
-    print("Odds Games:", len(odds))
+    print("Games:", len(games), "| Odds:", len(odds))
 
-    for g in espn_games:
+    for g in games:
         try:
-            comp = g["competitions"][0]
-            teams = comp["competitors"]
+            home = g["home"]
+            away = g["away"]
+            runs = g["runs"]
+            inning = g["inning"]
+            half = g["half"]
+            outs = g["outs"]
 
-            home = teams[0]["team"]["displayName"]
-            away = teams[1]["team"]["displayName"]
-
-            home_score = int(teams[0]["score"])
-            away_score = int(teams[1]["score"])
-            runs = home_score + away_score
-
-            situation = comp.get("situation", {})
-            inning = situation.get("inning", 1)
-            half = situation.get("halfInning", "top")
-            outs = situation.get("outs", 0)
-
-            status = g["status"]["type"]["description"]
-
-            print(f"\n{away} vs {home} | Status: {status}")
+            print(f"\n{away} vs {home}")
             print(f"Runs: {runs} | Inning: {inning} {half} | Outs: {outs}")
 
-            # 🔥 CUSTOM LIVE DETECTION
-            is_live = False
-            if inning > 1 or outs > 0 or runs > 0:
-                is_live = True
-
-            if not is_live:
-                print("⏭️ Skipped: not live (custom)")
-                continue
-
-            # innings calculation
+            # innings calc
             innings = inning - 1
             if half == "bottom":
                 innings += 0.5
@@ -151,9 +174,14 @@ def check():
 
             print("Innings calc:", round(innings, 2))
 
-            # 🔥 early filter (slightly relaxed for debug)
-            if innings < 1.5:
-                print("⏭️ Skipped: too early")
+            # 🔥 live filter
+            if inning == 1 and outs == 0 and runs == 0:
+                print("⏭️ Not started")
+                continue
+
+            # 🔥 early filter
+            if innings < 1.0:
+                print("⏭️ Too early")
                 continue
 
             market = find_market(home, away, odds)
@@ -165,7 +193,7 @@ def check():
             print("Market:", market)
 
             if market < 4 or market > 16:
-                print("⏭️ Skipped: weird market")
+                print("⏭️ Bad market")
                 continue
 
             model = project_total(runs, inning, half, outs)
@@ -177,7 +205,6 @@ def check():
 
             prev = last_markets.get(game_id)
             movement = 0
-
             if prev:
                 movement = round(market - prev, 2)
 
@@ -191,8 +218,7 @@ def check():
                 print("⏭️ Already alerted")
                 continue
 
-            # debug threshold
-            if abs(edge) < 0.8:
+            if abs(edge) < 1.0:
                 print("⏭️ Edge too small")
                 continue
 
@@ -215,7 +241,7 @@ def check():
 # ---------------- LOOP ----------------
 while True:
     try:
-        print("\n=== SHARP DEBUG CHECK ===")
+        print("\n=== SHARP CHECK ===")
         check()
     except Exception as e:
         print("MAIN ERROR:", e)
