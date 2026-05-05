@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (REALISTIC MODEL) STARTING...")
+print("🚀 SHARP+ BOT (FINAL FILTERED VERSION) STARTING...")
 
 import requests
 import time
@@ -74,14 +74,13 @@ def find_market(home, away, odds):
 def project_total(runs, progress):
     BASELINE = 8.8
 
-    # 🔥 strong regression early (KEY FIX)
+    # strong regression early
     if progress < 3:
         return round(BASELINE + (runs * 0.3), 2)
 
     pace = runs / progress
     raw = pace * 9
 
-    # 🔥 heavier baseline weight = more realistic
     if progress < 5:
         w = 0.25
     elif progress < 7:
@@ -91,7 +90,7 @@ def project_total(runs, progress):
 
     proj = (raw * w) + (BASELINE * (1 - w))
 
-    # clamp to realistic MLB totals
+    # clamp realistic range
     proj = max(4, min(14, proj))
 
     return round(proj, 2)
@@ -121,11 +120,11 @@ def check():
             print(f"\n{away} vs {home}")
             print(f"Runs: {runs} | Outs: {outs}")
 
-            # 🔥 estimated progress (no inning reliance)
+            # 🔥 estimated game progress
             progress = (outs / 3) + (runs * 0.6)
             print("Progress:", round(progress, 2))
 
-            # 🔥 filter early game noise
+            # early game filter
             if progress < 2.5:
                 print("⏭️ Too early")
                 continue
@@ -150,9 +149,11 @@ def check():
             game_id = f"{home}-{away}"
 
             prev = last_markets.get(game_id)
-            movement = 0
-            if prev:
-                movement = round(market - prev, 2)
+            movement = round(market - prev, 2) if prev else 0
+
+            # ignore tiny movement noise
+            if abs(movement) < 0.25:
+                movement = 0
 
             last_markets[game_id] = market
 
@@ -164,19 +165,28 @@ def check():
                 print("⏭️ Already alerted")
                 continue
 
-            # 🔥 tighter edge filter (IMPORTANT)
-            if abs(edge) < 1.8:
+            # 🔥 stronger edge requirement
+            if abs(edge) < 2.0:
                 print("⏭️ Edge too small")
                 continue
 
             bet = "OVER" if edge > 0 else "UNDER"
+
+            # 🔥 SHARP TRAP FILTER
+            if bet == "OVER" and movement > 0:
+                print("⏭️ Trap: line rising on OVER")
+                continue
+
+            if bet == "UNDER" and movement < 0:
+                print("⏭️ Trap: line dropping on UNDER")
+                continue
 
             print("🚨 SIGNAL:", bet)
 
             send(
                 f"🚨 LIVE TOTAL ({bet})\n"
                 f"{away} vs {home}\n\n"
-                f"Runs: {runs}\nMarket: {market}\nModel: {model}\nEdge: {edge}"
+                f"Runs: {runs}\nMarket: {market}\nModel: {model}\nEdge: {edge}\nMovement: {movement}"
             )
 
             alerted.add(key)
