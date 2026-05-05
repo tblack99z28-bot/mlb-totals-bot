@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (MORE SIGNALS TUNED) STARTING...")
+print("🚀 SHARP+ BOT (FINAL REAL-WORLD SAFE) STARTING...")
 
 import requests
 import time
@@ -180,11 +180,21 @@ def check():
 
             print("Sharp:", sharp, "| Soft:", soft)
 
+            # 🚨 DEAD LINE FILTER
+            if runs >= soft - 0.5:
+                print("⏭️ Line already dead / too close")
+                continue
+
+            # 🚨 UNREALISTIC LOW FILTER
+            if runs <= soft - 12:
+                print("⏭️ Unrealistic low total vs line")
+                continue
+
             if soft < 4 or soft > 16:
                 print("⏭️ Bad market")
                 continue
 
-            # 🔥 RELAXED GAP FILTER
+            # GAP
             line_gap = round(sharp - soft, 2)
             print("Gap:", line_gap)
 
@@ -201,7 +211,7 @@ def check():
             game_id = f"{home}-{away}"
             key = f"{game_id}-{int(progress)}"
 
-            # 🔥 RELAXED EDGE FILTER
+            # EDGE FILTER
             if abs(edge) >= 4:
                 tier = "ELITE"
             elif abs(edge) >= 2.5:
