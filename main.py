@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (FINAL + FALLBACK MATCH) STARTING...")
+print("🚀 SHARP+ BOT (MORE SIGNALS TUNED) STARTING...")
 
 import requests
 import time
@@ -64,7 +64,7 @@ def find_market(home, away, odds):
     home_c = clean(home)
     away_c = clean(away)
 
-    # ---------- PRIMARY MATCH ----------
+    # PRIMARY MATCH
     for game in odds:
         h = clean(game.get("home_team", ""))
         a = clean(game.get("away_team", ""))
@@ -80,35 +80,29 @@ def find_market(home, away, odds):
 
         if match_count >= 2:
             totals = []
-
             for book in game.get("bookmakers", []):
                 for market in book.get("markets", []):
                     if market.get("key") == "totals":
                         for o in market.get("outcomes", []):
                             if "point" in o:
                                 totals.append(float(o["point"]))
-
             if totals:
                 return max(totals), min(totals)
 
-    # ---------- FALLBACK MATCH ----------
+    # FALLBACK MATCH
     print("⚠️ Trying fallback match...")
-
     for game in odds:
         h = clean(game.get("home_team", ""))
         a = clean(game.get("away_team", ""))
 
-        # match ANY team (looser)
         if home_c in h or away_c in a or home_c in a or away_c in h:
             totals = []
-
             for book in game.get("bookmakers", []):
                 for market in book.get("markets", []):
                     if market.get("key") == "totals":
                         for o in market.get("outcomes", []):
                             if "point" in o:
                                 totals.append(float(o["point"]))
-
             if totals:
                 print("✅ Fallback match found")
                 return max(totals), min(totals)
@@ -162,11 +156,10 @@ def check():
             print(f"\n{away} vs {home}")
             print(f"Runs: {runs} | Outs: {outs}")
 
-            # ---------------- PROGRESS ----------------
+            # PROGRESS
             progress = (outs / 3) + (runs * 0.6)
             print("Progress:", round(progress, 2))
 
-            # 🔥 TIMING FILTER FIRST
             if progress < 3.0:
                 print("⏭️ Too early")
                 continue
@@ -175,7 +168,7 @@ def check():
                 print("⏭️ Game not stable yet")
                 continue
 
-            # ---------------- MARKET ----------------
+            # MARKET
             sharp, soft = find_market(home, away, odds)
 
             if sharp is None:
@@ -191,15 +184,15 @@ def check():
                 print("⏭️ Bad market")
                 continue
 
-            # ---------------- GAP ----------------
+            # 🔥 RELAXED GAP FILTER
             line_gap = round(sharp - soft, 2)
             print("Gap:", line_gap)
 
-            if line_gap < 0.6:
+            if line_gap < 0.5:
                 print("⏭️ No sharp disagreement")
                 continue
 
-            # ---------------- MODEL ----------------
+            # MODEL
             model = project_total(runs, progress)
             edge = round(model - soft, 2)
 
@@ -208,21 +201,20 @@ def check():
             game_id = f"{home}-{away}"
             key = f"{game_id}-{int(progress)}"
 
-            # ---------------- EDGE FILTER ----------------
+            # 🔥 RELAXED EDGE FILTER
             if abs(edge) >= 4:
                 tier = "ELITE"
-            elif abs(edge) >= 2.8:
+            elif abs(edge) >= 2.5:
                 tier = "STRONG"
             else:
                 print("⏭️ Edge too small")
                 continue
 
-            # ---------------- DUPLICATE ----------------
             if key in alerted:
                 print("⏭️ Already alerted")
                 continue
 
-            # ---------------- SIGNAL ----------------
+            # SIGNAL
             bet = "OVER" if edge > 0 else "UNDER"
 
             print(f"🚨 {tier} SIGNAL:", bet)
@@ -238,7 +230,7 @@ def check():
         except Exception as e:
             print("Game error:", e)
 
-# ---------------- LOOP ----------------
+# LOOP
 while True:
     try:
         print("\n=== SHARP CHECK ===")
