@@ -65,10 +65,9 @@ def find_market(home, away, odds):
                         for o in market.get("outcomes", []):
                             if "point" in o:
                                 return o["point"]
-
     return None
 
-# ---------------- 🔥 STABLE MODEL ----------------
+# ---------------- 🔥 FINAL SHARP MODEL ----------------
 def project_total(runs, inning, half, outs):
     BASELINE = 8.8
 
@@ -76,34 +75,39 @@ def project_total(runs, inning, half, outs):
     innings = inning - 1
     if half == "bottom":
         innings += 0.5
-
     innings += outs / 3
 
-    # 🛑 EARLY GAME PROTECTION
-    if innings < 1:
-        return round(BASELINE + (runs * 0.5), 2)
+    # 🛑 ignore early chaos
+    if innings < 2:
+        return round(BASELINE + (runs * 0.2), 2)
 
     # raw pace
     pace = runs / innings
     raw_proj = pace * 9
 
     # dynamic weighting
-    if innings < 3:
-        weight = 0.2
-    elif innings < 5:
-        weight = 0.4
-    elif innings < 7:
-        weight = 0.6
+    if innings < 4:
+        weight = 0.25
+    elif innings < 6:
+        weight = 0.5
+    elif innings < 8:
+        weight = 0.7
     else:
-        weight = 0.8
+        weight = 0.85
 
     proj = (raw_proj * weight) + (BASELINE * (1 - weight))
 
-    # late game bump
+    # cap unrealistic outputs
+    if proj > 15:
+        proj = 15
+    if proj < 3:
+        proj = 3
+
+    # late game boost
     if inning >= 7:
-        proj += 0.5
+        proj += 0.4
     elif inning >= 5:
-        proj += 0.25
+        proj += 0.2
 
     return round(proj, 2)
 
@@ -124,7 +128,6 @@ def check():
 
             home_score = int(teams[0]["score"])
             away_score = int(teams[1]["score"])
-
             runs = home_score + away_score
 
             status = g["status"]["type"]["description"]
@@ -156,8 +159,12 @@ def check():
             if key in alerted:
                 continue
 
-            # 🔥 EDGE FILTER
-            if abs(edge) < 0.7:
+            # 🛑 no bets early
+            if inning < 3:
+                continue
+
+            # 🔥 sharp threshold
+            if abs(edge) < 1.0:
                 continue
 
             bet = "OVER" if edge > 0 else "UNDER"
