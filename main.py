@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (MARKET-AWARE FINAL) STARTING...")
+print("🚀 SHARP+ BOT (TRUE FINAL BUILD) STARTING...")
 
 import requests
 import time
@@ -121,9 +121,14 @@ def check():
             progress = (outs / 3) + (runs * 0.6)
             print("Progress:", round(progress, 2))
 
-            # 🔥 stronger early filter
+            # 🔥 early filter
             if progress < 3.0:
                 print("⏭️ Too early")
+                continue
+
+            # 🔥 early scoring trap filter
+            if runs >= 6 and progress < 5:
+                print("⏭️ Early scoring spike trap")
                 continue
 
             market = find_market(home, away, odds)
@@ -145,18 +150,18 @@ def check():
 
             game_id = f"{home}-{away}"
 
-            # 🔥 movement tracking (history-based)
+            # 🔥 movement tracking (LONG WINDOW)
             history = last_markets.get(game_id, [])
             history.append(market)
 
-            if len(history) > 5:
+            if len(history) > 20:
                 history.pop(0)
 
             last_markets[game_id] = history
 
             movement = 0
-            if len(history) >= 2:
-                movement = round(history[-1] - history[0], 2)
+            if len(history) >= 3:
+                movement = round(market - history[0], 2)
 
             if abs(movement) < 0.5:
                 movement = 0
@@ -169,14 +174,14 @@ def check():
                 print("⏭️ Already alerted")
                 continue
 
-            # 🔥 stronger edge filter
+            # 🔥 strong edge filter
             if abs(edge) < 2.0:
                 print("⏭️ Edge too small")
                 continue
 
             bet = "OVER" if edge > 0 else "UNDER"
 
-            # 🔥 trap filter
+            # 🔥 TRAP FILTER
             if bet == "OVER" and movement > 0:
                 print("⏭️ Trap: line rising on OVER")
                 continue
