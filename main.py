@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (FINAL - MATCH FIXED + CLEAN FLOW) STARTING...")
+print("🚀 SHARP+ BOT (FINAL + FALLBACK MATCH) STARTING...")
 
 import requests
 import time
@@ -59,16 +59,16 @@ def clean(name):
         .replace("losangeles", "la")
     )
 
-# ---------------- MATCH (FINAL FIX) ----------------
+# ---------------- MATCH ----------------
 def find_market(home, away, odds):
     home_c = clean(home)
     away_c = clean(away)
 
+    # ---------- PRIMARY MATCH ----------
     for game in odds:
         h = clean(game.get("home_team", ""))
         a = clean(game.get("away_team", ""))
 
-        # 🔥 robust matching (order + naming safe)
         teams_api = {h, a}
         teams_espn = {home_c, away_c}
 
@@ -89,6 +89,28 @@ def find_market(home, away, odds):
                                 totals.append(float(o["point"]))
 
             if totals:
+                return max(totals), min(totals)
+
+    # ---------- FALLBACK MATCH ----------
+    print("⚠️ Trying fallback match...")
+
+    for game in odds:
+        h = clean(game.get("home_team", ""))
+        a = clean(game.get("away_team", ""))
+
+        # match ANY team (looser)
+        if home_c in h or away_c in a or home_c in a or away_c in h:
+            totals = []
+
+            for book in game.get("bookmakers", []):
+                for market in book.get("markets", []):
+                    if market.get("key") == "totals":
+                        for o in market.get("outcomes", []):
+                            if "point" in o:
+                                totals.append(float(o["point"]))
+
+            if totals:
+                print("✅ Fallback match found")
                 return max(totals), min(totals)
 
     return None, None
@@ -144,7 +166,7 @@ def check():
             progress = (outs / 3) + (runs * 0.6)
             print("Progress:", round(progress, 2))
 
-            # 🔥 HARD TIMING FILTER FIRST
+            # 🔥 TIMING FILTER FIRST
             if progress < 3.0:
                 print("⏭️ Too early")
                 continue
