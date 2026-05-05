@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (TUNED FREE SHARP SYSTEM) STARTING...")
+print("🚀 SHARP+ BOT (CLEAN FINAL FIXED) STARTING...")
 
 import requests
 import time
@@ -60,7 +60,9 @@ def find_market(home, away, odds):
         h = clean(game.get("home_team", ""))
         a = clean(game.get("away_team", ""))
 
-        if home_c in h and away_c in a:
+        # 🔥 FIXED MATCH (handles reversed teams)
+        if (home_c in h and away_c in a) or (home_c in a and away_c in h):
+
             totals = []
 
             for book in game.get("bookmakers", []):
@@ -124,9 +126,24 @@ def check():
             print(f"\n{away} vs {home}")
             print(f"Runs: {runs} | Outs: {outs}")
 
+            # ======================
+            # 🔥 PROGRESS FIRST
+            # ======================
             progress = (outs / 3) + (runs * 0.6)
             print("Progress:", round(progress, 2))
 
+            # 🔥 HARD TIMING FILTER (FIRST)
+            if progress < 3.0:
+                print("⏭️ Too early")
+                continue
+
+            if progress < 4.0:
+                print("⏭️ Game not stable yet")
+                continue
+
+            # ======================
+            # 🔥 MARKET
+            # ======================
             sharp, soft = find_market(home, away, odds)
 
             if sharp is None:
@@ -142,14 +159,17 @@ def check():
                 print("⏭️ Bad market")
                 continue
 
+            # 🔥 GAP FILTER BEFORE MODEL
             line_gap = round(sharp - soft, 2)
             print("Gap:", line_gap)
 
-            # 🔥 relaxed gap filter
             if line_gap < 0.6:
                 print("⏭️ No sharp disagreement")
                 continue
 
+            # ======================
+            # 🔥 MODEL
+            # ======================
             model = project_total(runs, progress)
             edge = round(model - soft, 2)
 
@@ -159,37 +179,21 @@ def check():
             key = f"{game_id}-{int(progress)}"
 
             # ======================
-            # 🔥 EDGE TIERING (UPDATED)
+            # 🔥 EDGE TIERING
             # ======================
             if abs(edge) >= 4:
                 tier = "ELITE"
             elif abs(edge) >= 2.8:
                 tier = "STRONG"
             else:
-                tier = "NONE"
+                print("⏭️ Edge too small")
+                continue
 
             # ======================
-            # 🔥 FILTER BLOCK
+            # 🔥 DUPLICATE FILTER
             # ======================
-            skip_reason = None
-
-            if progress < 3.0:
-                skip_reason = "Too early"
-
-            elif progress < 4.0:
-                skip_reason = "Game not stable yet"
-
-            elif runs >= 6 and progress < 5 and abs(edge) < 3:
-                skip_reason = "Weak early spike"
-
-            elif tier == "NONE":
-                skip_reason = "Edge too small"
-
-            elif key in alerted:
-                skip_reason = "Already alerted"
-
-            if skip_reason:
-                print(f"⏭️ {skip_reason}")
+            if key in alerted:
+                print("⏭️ Already alerted")
                 continue
 
             # ======================
