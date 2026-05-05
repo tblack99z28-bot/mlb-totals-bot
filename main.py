@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (BALANCED VERSION) STARTING...")
+print("🚀 SHARP+ BOT (CLEAN FINAL - NO LOGIC LEAKS) STARTING...")
 
 import requests
 import time
@@ -121,35 +121,29 @@ def check():
             progress = (outs / 3) + (runs * 0.6)
             print("Progress:", round(progress, 2))
 
-            # 🔥 early filters
-            if progress < 3.0:
-                print("⏭️ Too early")
-                continue
-
+            # 🔥 get market FIRST (so we can compute edge early)
             market = find_market(home, away, odds)
+
             if market is None:
                 print("❌ No market match")
                 continue
 
+            market = round(float(market), 1)
             print("Market:", market)
 
             if market < 4 or market > 16:
                 print("⏭️ Bad market")
                 continue
 
+            # 🔥 model + edge
             model = project_total(runs, progress)
             edge = round(model - market, 2)
 
             print("Model:", model, "| Edge:", edge)
 
-            # 🔥 SMART early scoring filter (fixed)
-            if runs >= 6 and progress < 5 and edge < 3:
-                print("⏭️ Weak early spike (no real edge)")
-                continue
-
             game_id = f"{home}-{away}"
 
-            # track market history (still useful)
+            # 🔥 track market history
             history = last_markets.get(game_id, [])
             history.append(market)
             if len(history) > 20:
@@ -164,19 +158,38 @@ def check():
 
             key = f"{game_id}-{int(progress)}"
 
-            if key in alerted:
-                print("⏭️ Already alerted")
+            # ======================
+            # 🔥 ALL FILTERS FIRST
+            # ======================
+
+            # early game
+            if progress < 3.0:
+                print("⏭️ Too early")
                 continue
 
-            # 🔥 tighter edge filter
+            # weak early spike
+            if runs >= 6 and progress < 5 and abs(edge) < 3:
+                print("⏭️ Weak early spike (no real edge)")
+                continue
+
+            # edge strength
             if abs(edge) < 2.2:
                 print("⏭️ Edge too small")
                 continue
 
-            # 🔥 only avoid extreme late movement
+            # large late movement
             if abs(movement) >= 1.5:
                 print("⏭️ Large market move - avoid")
                 continue
+
+            # already alerted
+            if key in alerted:
+                print("⏭️ Already alerted")
+                continue
+
+            # ======================
+            # 🚨 SIGNAL (ONLY HERE)
+            # ======================
 
             bet = "OVER" if edge > 0 else "UNDER"
 
