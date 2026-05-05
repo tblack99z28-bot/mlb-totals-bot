@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (ESTIMATED PROGRESS) STARTING...")
+print("🚀 SHARP+ BOT (REALISTIC MODEL) STARTING...")
 
 import requests
 import time
@@ -70,32 +70,29 @@ def find_market(home, away, odds):
                                 return o["point"]
     return None
 
-# ---------------- MODEL ----------------
+# ---------------- SHARP MODEL ----------------
 def project_total(runs, progress):
     BASELINE = 8.8
 
-    if progress < 2:
-        return BASELINE
+    # 🔥 strong regression early (KEY FIX)
+    if progress < 3:
+        return round(BASELINE + (runs * 0.3), 2)
 
     pace = runs / progress
     raw = pace * 9
 
-    if progress < 4:
+    # 🔥 heavier baseline weight = more realistic
+    if progress < 5:
         w = 0.25
-    elif progress < 6:
-        w = 0.5
-    elif progress < 8:
-        w = 0.7
+    elif progress < 7:
+        w = 0.4
     else:
-        w = 0.85
+        w = 0.6
 
     proj = (raw * w) + (BASELINE * (1 - w))
-    proj = max(3, min(15, proj))
 
-    if progress >= 7:
-        proj += 0.4
-    elif progress >= 5:
-        proj += 0.2
+    # clamp to realistic MLB totals
+    proj = max(4, min(14, proj))
 
     return round(proj, 2)
 
@@ -124,13 +121,12 @@ def check():
             print(f"\n{away} vs {home}")
             print(f"Runs: {runs} | Outs: {outs}")
 
-            # 🔥 ESTIMATED GAME PROGRESS (NO INNING)
+            # 🔥 estimated progress (no inning reliance)
             progress = (outs / 3) + (runs * 0.6)
+            print("Progress:", round(progress, 2))
 
-            print("Estimated progress:", round(progress, 2))
-
-            # 🔥 FILTER EARLY GAME
-            if progress < 2:
+            # 🔥 filter early game noise
+            if progress < 2.5:
                 print("⏭️ Too early")
                 continue
 
@@ -168,8 +164,8 @@ def check():
                 print("⏭️ Already alerted")
                 continue
 
-            # 🔥 EDGE FILTER
-            if abs(edge) < 1.2:
+            # 🔥 tighter edge filter (IMPORTANT)
+            if abs(edge) < 1.8:
                 print("⏭️ Edge too small")
                 continue
 
