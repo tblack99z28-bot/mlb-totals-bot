@@ -1,15 +1,17 @@
-print("🚀 BOT STARTING...")
+print("🚀 SPORTSBOOK BOT STARTING...")
 
 import requests
 import time
-from datetime import datetime
 import os
 
 WEBHOOK = os.getenv("DISCORD_WEBHOOK")
+ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 
 print("WEBHOOK:", "SET" if WEBHOOK else "MISSING")
+print("ODDS API:", "SET" if ODDS_API_KEY else "MISSING")
 
 alerted = set()
+last_scores = {}
 
 # ---------------- DISCORD ----------------
 def send(msg):
@@ -19,109 +21,114 @@ def send(msg):
         except:
             pass
 
-# ---------------- SCHEDULE ----------------
-def get_games():
-    today = datetime.now().strftime("%Y-%m-%d")
-    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}"
-    return requests.get(url).json()
+# ---------------- FETCH ODDS ----------------
+def get_odds():
+    url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/"
 
-def get_live(gamePk):
-    ts = int(time.time())
-    url = f"https://statsapi.mlb.com/api/v1.1/game/{gamePk}/feed/live?_={ts}"
-    return requests.get(url).json()
+    params = {
+        "apiKey": ODDS_API_KEY,
+        "regions": "us",
+        "markets": "totals",
+        "oddsFormat": "decimal"
+    }
 
-# ---------------- 🔥 LIVE DETECTION (NO PLAYS) ----------------
-def is_live(linescore):
     try:
-        inning = linescore.get("currentInning", 0)
-        outs = linescore.get("outs", 0)
+        data = requests.get(url, params=params).json()
 
-        home = linescore.get("teams", {}).get("home", {}).get("runs", 0)
-        away = linescore.get("teams", {}).get("away", {}).get("runs", 0)
+        if not isinstance(data, list):
+            print("ODDS ERROR:", data)
+            return []
 
-        # 🔥 ANY REAL GAME SIGNAL
-        if inning >= 1:
-            return True
-        if outs > 0:
-            return True
-        if home > 0 or away > 0:
-            return True
+        return data
 
-    except:
-        pass
-
-    return False
+    except Exception as e:
+        print("Odds fetch error:", e)
+        return []
 
 # ---------------- MODEL ----------------
-def projection(linescore):
-    inning = linescore.get("currentInning", 1)
-    outs = linescore.get("outs", 0)
+def estimate_total(game, market_total):
+    game_id = game["id"]
 
-    home = linescore.get("teams", {}).get("home", {}).get("runs", 0)
-    away = linescore.get("teams", {}).get("away", {}).get("runs", 0)
+    # fake "progress" based on score change
+    home_score = game.get("scores", {}).get("home", 0)
+    away_score = game.get("scores", {}).get("away", 0)
 
-    total = home + away
-    innings = inning - 1 + (outs / 3)
+    total_runs = home_score + away_score
 
-    if innings <= 0:
-        return total
+    prev = last_scores.get(game_id, 0)
+    last_scores[game_id] = total_runs
 
-    return round((total / innings) * 9, 2)
+    # 🔥 estimate pace
+    pace = total_runs - prev
+
+    # base projection
+    projection = market_total
+
+    # adjust for scoring pace
+    projection += pace * 1.5
+
+    return round(projection, 2), total_runs
 
 # ---------------- MAIN ----------------
 def check():
-    data = get_games()
+    games = get_odds()
 
-    for d in data.get("dates", []):
-        print("DATE:", d["date"], "| Games:", len(d["games"]))
+    print("Games pulled:", len(games))
 
-        for game in d["games"]:
-            gamePk = game["gamePk"]
+    for game in games:
+        home = game.get("home_team")
+        away = game.get("away_team")
 
-            try:
-                live = get_live(gamePk)
-                linescore = live.get("liveData", {}).get("linescore", {})
-            except:
-                continue
+        bookmakers = game.get("bookmakers", [])
 
-            inning = linescore.get("currentInning", 0)
-            outs = linescore.get("outs", 0)
+        market_total = None
 
-            print(f"Game {gamePk} | Inning {inning} | Outs {outs}")
+        for book in bookmakers:
+            for market in book.get("markets", []):
+                if market.get("key") == "totals":
+                    for outcome in market.get("outcomes", []):
+                        if "point" in outcome:
+                            market_total = outcome["point"]
+                            break
 
-            if not is_live(linescore):
-                continue
+        if market_total is None:
+            continue
 
-            print(f"🔥 LIVE GAME: {gamePk} | Inning {inning} | Outs {outs}")
+        model, runs = estimate_total(game, market_total)
 
-            if inning < 1:
-                continue
+        edge = round(model - market_total, 2)
 
-            if outs not in [0, 2]:
-                continue
+        print(f"{away} vs {home}")
+        print("RUNS:", runs, "| MARKET:", market_total, "| MODEL:", model, "| EDGE:", edge)
 
-            model = projection(linescore)
-            print("MODEL:", model)
+        key = f"{game['id']}"
 
-            key = f"{gamePk}-{inning}"
-            if key in alerted:
-                continue
+        if key in alerted:
+            continue
 
-            send(
-                f"⚡ LIVE GAME DETECTED\n"
-                f"Game: {gamePk}\n"
-                f"Inning: {inning}\n"
-                f"Model Total: {model}"
-            )
+        # 🔥 thresholds
+        if abs(edge) < 0.7:
+            continue
 
-            alerted.add(key)
+        bet = "OVER" if edge > 0 else "UNDER"
+
+        send(
+            f"🚨 LIVE TOTAL EDGE ({bet})\n"
+            f"{away} vs {home}\n\n"
+            f"Runs: {runs}\n"
+            f"Market: {market_total}\n"
+            f"Model: {model}\n"
+            f"Edge: {edge}"
+        )
+
+        alerted.add(key)
 
 # ---------------- LOOP ----------------
 while True:
     try:
-        print("\n=== Checking games ===")
+        print("\n=== Checking sportsbook data ===")
         check()
     except Exception as e:
         print("ERROR:", e)
 
-    time.sleep(10)
+    time.sleep(20)
