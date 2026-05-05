@@ -95,7 +95,6 @@ def project_total(runs, inning, half, outs):
         w = 0.85
 
     proj = (raw * w) + (BASELINE * (1 - w))
-
     proj = max(3, min(15, proj))
 
     if inning >= 7:
@@ -125,28 +124,34 @@ def check():
             away_score = int(teams[1]["score"])
             runs = home_score + away_score
 
-            status = g["status"]["type"]["description"]
-
-            print(f"\n{away} vs {home} | Status: {status}")
-
-            if "In Progress" not in status:
-                print("⏭️ Skipped: not live")
-                continue
-
             situation = comp.get("situation", {})
             inning = situation.get("inning", 1)
             half = situation.get("halfInning", "top")
             outs = situation.get("outs", 0)
 
+            status = g["status"]["type"]["description"]
+
+            print(f"\n{away} vs {home} | Status: {status}")
+            print(f"Runs: {runs} | Inning: {inning} {half} | Outs: {outs}")
+
+            # 🔥 CUSTOM LIVE DETECTION
+            is_live = False
+            if inning > 1 or outs > 0 or runs > 0:
+                is_live = True
+
+            if not is_live:
+                print("⏭️ Skipped: not live (custom)")
+                continue
+
+            # innings calculation
             innings = inning - 1
             if half == "bottom":
                 innings += 0.5
             innings += outs / 3
 
-            print(f"Runs: {runs} | Inning: {inning} {half} | Outs: {outs}")
-            print(f"Innings calc: {innings}")
+            print("Innings calc:", round(innings, 2))
 
-            # 🔥 TEMP: loosen filter so you SEE games
+            # 🔥 early filter (slightly relaxed for debug)
             if innings < 1.5:
                 print("⏭️ Skipped: too early")
                 continue
@@ -157,9 +162,8 @@ def check():
                 print("❌ No market match")
                 continue
 
-            print("Market found:", market)
+            print("Market:", market)
 
-            # loosen filter for now
             if market < 4 or market > 16:
                 print("⏭️ Skipped: weird market")
                 continue
@@ -179,7 +183,7 @@ def check():
 
             last_markets[game_id] = market
 
-            print("Line movement:", movement)
+            print("Movement:", movement)
 
             key = f"{game_id}-{inning}"
 
@@ -187,7 +191,7 @@ def check():
                 print("⏭️ Already alerted")
                 continue
 
-            # 🔥 TEMP LOWER THRESHOLD FOR DEBUG
+            # debug threshold
             if abs(edge) < 0.8:
                 print("⏭️ Edge too small")
                 continue
