@@ -16,7 +16,7 @@ print("ODDS API:", "SET" if ODDS_API_KEY else "MISSING")
 alerted = set()
 last_totals = {}
 
-# 🔥 NEW: odds cache (prevents quota burn)
+# 🔥 odds cache (prevents quota burn)
 odds_cache = {}
 odds_last_fetch = 0
 
@@ -28,13 +28,28 @@ def send(msg):
         except Exception as e:
             print("Webhook error:", e)
 
-# ---------------- HELPERS ----------------
-def normalize(name):
-    return name.lower().replace(" ", "").replace(".", "").replace("-", "")
+# ---------------- TEAM MATCHING ----------------
+TEAM_MAP = {
+    "yankees": "yankees","mets": "mets","dodgers": "dodgers","padres": "padres",
+    "giants": "giants","braves": "braves","mariners": "mariners","angels": "angels",
+    "white sox": "whitesox","cubs": "cubs","phillies": "phillies","astros": "astros",
+    "rangers": "rangers","red sox": "redsox","blue jays": "bluejays","cardinals": "cardinals",
+    "brewers": "brewers","guardians": "guardians","twins": "twins","tigers": "tigers",
+    "royals": "royals","athletics": "athletics","rockies": "rockies","diamondbacks": "diamondbacks",
+    "nationals": "nationals","orioles": "orioles","rays": "rays","pirates": "pirates",
+    "reds": "reds","marlins": "marlins"
+}
 
-# ---------------- SCHEDULE ----------------
+def team_key(name):
+    name = name.lower()
+    for k in TEAM_MAP:
+        if k in name:
+            return TEAM_MAP[k]
+    return name.replace(" ", "")
+
+# ---------------- SCHEDULE (FIXED TIMEZONE) ----------------
 def get_schedule():
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today = datetime.now().strftime("%Y-%m-%d")  # 🔥 FIXED
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate={today}&endDate={today}"
     return requests.get(url).json()
 
@@ -42,7 +57,7 @@ def get_live(gamePk):
     url = f"https://statsapi.mlb.com/api/v1.1/game/{gamePk}/feed/live"
     return requests.get(url).json()
 
-# ---------------- FAST LIVE DETECTION ----------------
+# ---------------- LIVE DETECTION ----------------
 def is_game_live(live):
     try:
         game = live.get("gameData", {})
@@ -53,23 +68,17 @@ def is_game_live(live):
 
         if state == "Live":
             return True
-
         if linescore.get("outs", 0) > 0:
             return True
-
         if linescore.get("teams", {}).get("home", {}).get("runs", 0) > 0:
             return True
-
         if linescore.get("teams", {}).get("away", {}).get("runs", 0) > 0:
             return True
-
         if linescore.get("defense", {}).get("pitcher"):
             return True
-
         if linescore.get("offense", {}).get("batter"):
             return True
-
-        if detailed in ["In Progress", "Review", "Manager Challenge"]:
+        if detailed in ["In Progress", "Review"]:
             return True
 
     except:
@@ -77,7 +86,7 @@ def is_game_live(live):
 
     return False
 
-# ---------------- ODDS FETCH (1 CALL ONLY) ----------------
+# ---------------- ODDS FETCH (1 CALL / MIN) ----------------
 def fetch_all_odds():
     global odds_cache, odds_last_fetch
 
@@ -101,8 +110,8 @@ def fetch_all_odds():
         new_cache = {}
 
         for event in data:
-            home = normalize(event.get("home_team", ""))
-            away = normalize(event.get("away_team", ""))
+            home = team_key(event.get("home_team", ""))
+            away = team_key(event.get("away_team", ""))
 
             totals = []
 
@@ -132,45 +141,15 @@ def fetch_all_odds():
 def get_market_total(game):
     odds = fetch_all_odds()
 
-    home = normalize(game["teams"]["home"]["team"]["name"])
-    away = normalize(game["teams"]["away"]["team"]["name"])
+    home = team_key(game["teams"]["home"]["team"]["name"])
+    away = team_key(game["teams"]["away"]["team"]["name"])
 
-    key = f"{home}-{away}"
-
-    if key in odds:
-        return odds[key]
+    for key, total in odds.items():
+        if home in key and away in key:
+            return total
 
     print("❌ NO MATCH:", home, "vs", away)
     return None
-
-# ---------------- LINE MOVEMENT ----------------
-def get_line_movement(gamePk, current):
-    prev = last_totals.get(gamePk)
-    last_totals[gamePk] = current
-
-    if prev is None:
-        return 0
-
-    return round(current - prev, 2)
-
-# ---------------- PITCH COUNT ----------------
-def get_pitch_count(live):
-    try:
-        box = live["liveData"]["boxscore"]
-        defense = live["liveData"]["linescore"].get("defense", {})
-        pid = defense.get("pitcher", {}).get("id")
-
-        if not pid:
-            return 0
-
-        for t in ["home", "away"]:
-            players = box["teams"][t]["players"]
-            key = f"ID{pid}"
-            if key in players:
-                return players[key]["stats"]["pitching"].get("numberOfPitches", 0)
-    except:
-        pass
-    return 0
 
 # ---------------- MODEL ----------------
 def projection(live):
@@ -194,27 +173,10 @@ def projection(live):
                    if linescore.get("offense", {}).get(b)])
     proj += runners * 0.3
 
-    pitch_count = get_pitch_count(live)
-    if pitch_count >= 100:
-        proj += 1.2
-    elif pitch_count >= 90:
-        proj += 0.8
-    elif pitch_count >= 75:
-        proj += 0.5
-
-    box = live["liveData"]["boxscore"]
-    bullpen = len(box["teams"]["home"]["pitchers"]) > 1 or len(box["teams"]["away"]["pitchers"]) > 1
-    if bullpen:
-        proj += 0.5
-
-    diff = abs(home - away)
     if inning >= 7:
         proj += 0.6
     elif inning >= 5:
         proj += 0.3
-
-    if diff <= 2:
-        proj += 0.5
 
     return round(proj, 2)
 
@@ -234,13 +196,13 @@ def check():
             except:
                 continue
 
-            game_state = live.get("gameData", {}).get("status", {}).get("abstractGameState")
+            state = live.get("gameData", {}).get("status", {}).get("abstractGameState")
             detailed = live.get("gameData", {}).get("status", {}).get("detailedState")
 
             inning = linescore.get("currentInning", 0)
             outs = linescore.get("outs", 0)
 
-            print(f"Game {gamePk} | {game_state} | {detailed} | Inning {inning} | Outs {outs}")
+            print(f"Game {gamePk} | {state} | {detailed} | Inning {inning} | Outs {outs}")
 
             if not is_game_live(live):
                 continue
@@ -269,10 +231,6 @@ def check():
             if abs(edge) < 0.5:
                 continue
 
-            movement = get_line_movement(gamePk, market)
-            if abs(movement) > 1.5:
-                continue
-
             home = game["teams"]["home"]["team"]["name"]
             away = game["teams"]["away"]["team"]["name"]
 
@@ -284,9 +242,7 @@ def check():
                 f"Inning {inning}\n\n"
                 f"Model: {model}\n"
                 f"Market: {market}\n"
-                f"Edge: {edge}\n"
-                f"Move: {movement}\n"
-                f"Pitch Count: {get_pitch_count(live)}"
+                f"Edge: {edge}"
             )
 
             alerted.add(key)
