@@ -56,22 +56,27 @@ def get_live(gamePk):
     url = f"https://statsapi.mlb.com/api/v1.1/game/{gamePk}/feed/live"
     return requests.get(url).json()
 
-# ---------------- FIXED LIVE DETECTION ----------------
+# ---------------- REAL LIVE DETECTION ----------------
 def is_game_live(live):
     try:
-        status = live.get("gameData", {}).get("status", {})
-        state = status.get("abstractGameState", "")
-        detailed = status.get("detailedState", "")
-
-        if state == "Live":
-            return True
-
-        if detailed in ["In Progress", "Manager Challenge", "Review"]:
-            return True
-
-        # 🔥 fallback: inning started
         linescore = live.get("liveData", {}).get("linescore", {})
-        if linescore.get("currentInning", 0) >= 1:
+
+        inning = linescore.get("currentInning", 0)
+        outs = linescore.get("outs", 0)
+
+        home_runs = linescore.get("teams", {}).get("home", {}).get("runs", 0)
+        away_runs = linescore.get("teams", {}).get("away", {}).get("runs", 0)
+
+        offense = linescore.get("offense", {})
+
+        # 🔥 REAL GAME SIGNALS
+        if inning >= 1:
+            return True
+        if outs > 0:
+            return True
+        if home_runs > 0 or away_runs > 0:
+            return True
+        if offense.get("batter"):
             return True
 
     except:
@@ -188,20 +193,14 @@ def check():
             except:
                 continue
 
-            # DEBUG (temporary)
-            status = live.get("gameData", {}).get("status", {})
-            print("DEBUG:", status.get("abstractGameState"), "|", status.get("detailedState"))
-
+            # 🔥 ONLY REAL LIVE GAMES
             if not is_game_live(live):
                 continue
-
-            state = "LIVE"
-            detailed = status.get("detailedState")
 
             inning = linescore.get("currentInning", 0)
             outs = linescore.get("outs", 0)
 
-            print(f"Game {gamePk} | {state} | {detailed} | Inning {inning} | Outs {outs}")
+            print(f"Game {gamePk} | LIVE | Inning {inning} | Outs {outs}")
 
             if inning < 1:
                 continue
