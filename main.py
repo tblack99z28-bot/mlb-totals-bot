@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (STRONG + ELITE ONLY) STARTING...")
+print("🚀 SHARP+ BOT (FREE SHARP SYSTEM) STARTING...")
 
 import requests
 import time
@@ -11,7 +11,6 @@ print("WEBHOOK:", "SET" if WEBHOOK else "MISSING")
 print("ODDS API:", "SET" if ODDS_API_KEY else "MISSING")
 
 alerted = set()
-last_markets = {}
 
 # ---------------- DISCORD ----------------
 def send(msg):
@@ -63,19 +62,21 @@ def find_market(home, away, odds):
 
         if home_c in h and away_c in a:
 
-            bookmakers = game.get("bookmakers", [])
-            if not bookmakers:
-                return None
+            totals = []
 
-            book = bookmakers[0]
+            for book in game.get("bookmakers", []):
+                for market in book.get("markets", []):
+                    if market.get("key") == "totals":
+                        for o in market.get("outcomes", []):
+                            if "point" in o:
+                                totals.append(float(o["point"]))
 
-            for market in book.get("markets", []):
-                if market.get("key") == "totals":
-                    for o in market.get("outcomes", []):
-                        if "point" in o:
-                            return o["point"]
+            if totals:
+                sharp_line = max(totals)  # highest total
+                soft_line = min(totals)   # lowest total
+                return sharp_line, soft_line
 
-    return None
+    return None, None
 
 # ---------------- MODEL ----------------
 def project_total(runs, progress):
@@ -127,37 +128,34 @@ def check():
             progress = (outs / 3) + (runs * 0.6)
             print("Progress:", round(progress, 2))
 
-            market = find_market(home, away, odds)
-            if market is None:
+            sharp, soft = find_market(home, away, odds)
+
+            if sharp is None:
                 print("❌ No market match")
                 continue
 
-            market = round(float(market), 1)
-            print("Market:", market)
+            sharp = round(sharp, 1)
+            soft = round(soft, 1)
 
-            if market < 4 or market > 16:
+            print("Sharp:", sharp, "| Soft:", soft)
+
+            if soft < 4 or soft > 16:
                 print("⏭️ Bad market")
                 continue
 
+            line_gap = round(sharp - soft, 2)
+            print("Gap:", line_gap)
+
+            if line_gap < 0.8:
+                print("⏭️ No sharp disagreement")
+                continue
+
             model = project_total(runs, progress)
-            edge = round(model - market, 2)
+            edge = round(model - soft, 2)
 
             print("Model:", model, "| Edge:", edge)
 
             game_id = f"{home}-{away}"
-
-            history = last_markets.get(game_id, [])
-            history.append(market)
-            if len(history) > 20:
-                history.pop(0)
-            last_markets[game_id] = history
-
-            movement = 0
-            if len(history) >= 3:
-                movement = round(market - history[0], 2)
-
-            print("Movement:", movement)
-
             key = f"{game_id}-{int(progress)}"
 
             # ======================
@@ -178,14 +176,14 @@ def check():
             if progress < 3.0:
                 skip_reason = "Too early"
 
+            elif progress < 4.5:
+                skip_reason = "Game not stable yet"
+
             elif runs >= 6 and progress < 5 and abs(edge) < 3:
                 skip_reason = "Weak early spike"
 
             elif tier == "NONE":
                 skip_reason = "Edge too small"
-
-            elif abs(movement) >= 1.5:
-                skip_reason = "Large market move"
 
             elif key in alerted:
                 skip_reason = "Already alerted"
@@ -204,7 +202,7 @@ def check():
             send(
                 f"🚨 {tier} LIVE TOTAL ({bet})\n"
                 f"{away} vs {home}\n\n"
-                f"Runs: {runs}\nMarket: {market}\nModel: {model}\nEdge: {edge}"
+                f"Runs: {runs}\nSoft: {soft}\nSharp: {sharp}\nGap: {line_gap}\nModel: {model}\nEdge: {edge}"
             )
 
             alerted.add(key)
@@ -220,4 +218,4 @@ while True:
     except Exception as e:
         print("MAIN ERROR:", e)
 
-    time.sleep(20)
+    time.sleep(10)
