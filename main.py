@@ -6,10 +6,8 @@ from datetime import datetime
 import os
 
 WEBHOOK = os.getenv("DISCORD_WEBHOOK")
-ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 
 print("WEBHOOK:", "SET" if WEBHOOK else "MISSING")
-print("ODDS API:", "SET" if ODDS_API_KEY else "MISSING")
 
 alerted = set()
 
@@ -18,10 +16,10 @@ def send(msg):
     if WEBHOOK:
         try:
             requests.post(WEBHOOK, json={"content": msg})
-        except:
-            pass
+        except Exception as e:
+            print("Webhook error:", e)
 
-# ---------------- FAST SCHEDULE ----------------
+# ---------------- SCHEDULE ----------------
 def get_games():
     today = datetime.now().strftime("%Y-%m-%d")
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}"
@@ -31,18 +29,13 @@ def get_live(gamePk):
     url = f"https://statsapi.mlb.com/api/v1.1/game/{gamePk}/feed/live"
     return requests.get(url).json()
 
-# ---------------- REAL LIVE DETECTION ----------------
+# ---------------- 🔥 TRUE LIVE DETECTION ----------------
 def is_live(live):
     try:
-        linescore = live.get("liveData", {}).get("linescore", {})
+        plays = live.get("liveData", {}).get("plays", {}).get("allPlays", [])
 
-        inning = linescore.get("currentInning", 0)
-        outs = linescore.get("outs", 0)
-
-        # 🔥 SIMPLE + RELIABLE
-        if inning >= 1:
-            return True
-        if outs > 0:
+        # 🔥 REAL SIGNAL: plays exist
+        if len(plays) > 0:
             return True
 
     except:
@@ -80,30 +73,42 @@ def check():
 
             try:
                 live = get_live(gamePk)
-                linescore = live["liveData"]["linescore"]
             except:
                 continue
 
+            # 🔥 DEBUG: show plays count
+            plays = live.get("liveData", {}).get("plays", {}).get("allPlays", [])
+            print(f"Game {gamePk} | Plays: {len(plays)}")
+
             if not is_live(live):
                 continue
+
+            linescore = live["liveData"]["linescore"]
 
             inning = linescore.get("currentInning", 0)
             outs = linescore.get("outs", 0)
 
             print(f"🔥 LIVE GAME: {gamePk} | Inning {inning} | Outs {outs}")
 
+            if inning < 1:
+                continue
+
             if outs not in [0, 2]:
                 continue
 
             model = projection(live)
-
             print("MODEL:", model)
 
             key = f"{gamePk}-{inning}"
             if key in alerted:
                 continue
 
-            send(f"⚡ LIVE GAME DETECTED\nGame: {gamePk}\nInning: {inning}\nModel Total: {model}")
+            send(
+                f"⚡ LIVE GAME DETECTED\n"
+                f"Game: {gamePk}\n"
+                f"Inning: {inning}\n"
+                f"Model Total: {model}"
+            )
 
             alerted.add(key)
 
@@ -115,4 +120,4 @@ while True:
     except Exception as e:
         print("ERROR:", e)
 
-    time.sleep(10)  # 🔥 MUCH FASTER
+    time.sleep(10)
