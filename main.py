@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (STABLE FINAL FIXED) STARTING...")
+print("🚀 SHARP+ BOT (STRONG + ELITE ONLY) STARTING...")
 
 import requests
 import time
@@ -67,7 +67,6 @@ def find_market(home, away, odds):
             if not bookmakers:
                 return None
 
-            # 🔥 USE FIRST BOOK ONLY (stable)
             book = bookmakers[0]
 
             for market in book.get("markets", []):
@@ -125,11 +124,9 @@ def check():
             print(f"\n{away} vs {home}")
             print(f"Runs: {runs} | Outs: {outs}")
 
-            # progress
             progress = (outs / 3) + (runs * 0.6)
             print("Progress:", round(progress, 2))
 
-            # market
             market = find_market(home, away, odds)
             if market is None:
                 print("❌ No market match")
@@ -142,14 +139,13 @@ def check():
                 print("⏭️ Bad market")
                 continue
 
-            # model
             model = project_total(runs, progress)
             edge = round(model - market, 2)
+
             print("Model:", model, "| Edge:", edge)
 
             game_id = f"{home}-{away}"
 
-            # movement tracking (optional safety only)
             history = last_markets.get(game_id, [])
             history.append(market)
             if len(history) > 20:
@@ -165,7 +161,17 @@ def check():
             key = f"{game_id}-{int(progress)}"
 
             # ======================
-            # 🔥 HARD FILTER BLOCK
+            # 🔥 EDGE TIERING
+            # ======================
+            if abs(edge) >= 4:
+                tier = "ELITE"
+            elif abs(edge) >= 3:
+                tier = "STRONG"
+            else:
+                tier = "NONE"
+
+            # ======================
+            # 🔥 FILTER BLOCK
             # ======================
             skip_reason = None
 
@@ -175,7 +181,7 @@ def check():
             elif runs >= 6 and progress < 5 and abs(edge) < 3:
                 skip_reason = "Weak early spike"
 
-            elif abs(edge) < 2.2:
+            elif tier == "NONE":
                 skip_reason = "Edge too small"
 
             elif abs(movement) >= 1.5:
@@ -189,14 +195,14 @@ def check():
                 continue
 
             # ======================
-            # 🚨 SIGNAL (ONLY HERE)
+            # 🚨 SIGNAL
             # ======================
             bet = "OVER" if edge > 0 else "UNDER"
 
-            print("🚨 SIGNAL:", bet)
+            print(f"🚨 {tier} SIGNAL:", bet)
 
             send(
-                f"🚨 LIVE TOTAL ({bet})\n"
+                f"🚨 {tier} LIVE TOTAL ({bet})\n"
                 f"{away} vs {home}\n\n"
                 f"Runs: {runs}\nMarket: {market}\nModel: {model}\nEdge: {edge}"
             )
