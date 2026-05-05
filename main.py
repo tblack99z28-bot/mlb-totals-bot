@@ -16,7 +16,6 @@ print("ODDS API:", "SET" if ODDS_API_KEY else "MISSING")
 alerted = set()
 last_totals = {}
 
-# 🔥 odds cache (prevents quota burn)
 odds_cache = {}
 odds_last_fetch = 0
 
@@ -28,7 +27,7 @@ def send(msg):
         except Exception as e:
             print("Webhook error:", e)
 
-# ---------------- TEAM MATCHING ----------------
+# ---------------- TEAM MATCH ----------------
 TEAM_MAP = {
     "yankees": "yankees","mets": "mets","dodgers": "dodgers","padres": "padres",
     "giants": "giants","braves": "braves","mariners": "mariners","angels": "angels",
@@ -47,9 +46,9 @@ def team_key(name):
             return TEAM_MAP[k]
     return name.replace(" ", "")
 
-# ---------------- SCHEDULE (FIXED TIMEZONE) ----------------
+# ---------------- SCHEDULE ----------------
 def get_schedule():
-    today = datetime.now().strftime("%Y-%m-%d")  # 🔥 FIXED
+    today = datetime.now().strftime("%Y-%m-%d")
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate={today}&endDate={today}"
     return requests.get(url).json()
 
@@ -68,17 +67,15 @@ def is_game_live(live):
 
         if state == "Live":
             return True
+        if detailed in ["In Progress", "Review"]:
+            return True
         if linescore.get("outs", 0) > 0:
             return True
         if linescore.get("teams", {}).get("home", {}).get("runs", 0) > 0:
             return True
         if linescore.get("teams", {}).get("away", {}).get("runs", 0) > 0:
             return True
-        if linescore.get("defense", {}).get("pitcher"):
-            return True
         if linescore.get("offense", {}).get("batter"):
-            return True
-        if detailed in ["In Progress", "Review"]:
             return True
 
     except:
@@ -86,7 +83,7 @@ def is_game_live(live):
 
     return False
 
-# ---------------- ODDS FETCH (1 CALL / MIN) ----------------
+# ---------------- ODDS ----------------
 def fetch_all_odds():
     global odds_cache, odds_last_fetch
 
@@ -137,7 +134,6 @@ def fetch_all_odds():
 
     return odds_cache
 
-# ---------------- GET MARKET ----------------
 def get_market_total(game):
     odds = fetch_all_odds()
 
@@ -196,16 +192,18 @@ def check():
             except:
                 continue
 
-            state = live.get("gameData", {}).get("status", {}).get("abstractGameState")
-            detailed = live.get("gameData", {}).get("status", {}).get("detailedState")
+            # 🔥 ONLY process LIVE games
+            if not is_game_live(live):
+                continue
+
+            status = live.get("gameData", {}).get("status", {})
+            state = "LIVE"
+            detailed = status.get("detailedState")
 
             inning = linescore.get("currentInning", 0)
             outs = linescore.get("outs", 0)
 
             print(f"Game {gamePk} | {state} | {detailed} | Inning {inning} | Outs {outs}")
-
-            if not is_game_live(live):
-                continue
 
             if inning < 1:
                 continue
