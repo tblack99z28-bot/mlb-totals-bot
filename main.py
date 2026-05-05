@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (FREE SHARP SYSTEM) STARTING...")
+print("🚀 SHARP+ BOT (TUNED FREE SHARP SYSTEM) STARTING...")
 
 import requests
 import time
@@ -61,7 +61,6 @@ def find_market(home, away, odds):
         a = clean(game.get("away_team", ""))
 
         if home_c in h and away_c in a:
-
             totals = []
 
             for book in game.get("bookmakers", []):
@@ -72,8 +71,8 @@ def find_market(home, away, odds):
                                 totals.append(float(o["point"]))
 
             if totals:
-                sharp_line = max(totals)  # highest total
-                soft_line = min(totals)   # lowest total
+                sharp_line = max(totals)
+                soft_line = min(totals)
                 return sharp_line, soft_line
 
     return None, None
@@ -146,7 +145,8 @@ def check():
             line_gap = round(sharp - soft, 2)
             print("Gap:", line_gap)
 
-            if line_gap < 0.8:
+            # 🔥 relaxed gap filter
+            if line_gap < 0.6:
                 print("⏭️ No sharp disagreement")
                 continue
 
@@ -159,11 +159,11 @@ def check():
             key = f"{game_id}-{int(progress)}"
 
             # ======================
-            # 🔥 EDGE TIERING
+            # 🔥 EDGE TIERING (UPDATED)
             # ======================
             if abs(edge) >= 4:
                 tier = "ELITE"
-            elif abs(edge) >= 3:
+            elif abs(edge) >= 2.8:
                 tier = "STRONG"
             else:
                 tier = "NONE"
@@ -176,7 +176,7 @@ def check():
             if progress < 3.0:
                 skip_reason = "Too early"
 
-            elif progress < 4.5:
+            elif progress < 4.0:
                 skip_reason = "Game not stable yet"
 
             elif runs >= 6 and progress < 5 and abs(edge) < 3:
