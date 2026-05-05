@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (FINAL CLEAN + MATCH FIX) STARTING...")
+print("🚀 SHARP+ BOT (FINAL - MATCH FIXED + CLEAN FLOW) STARTING...")
 
 import requests
 import time
@@ -48,7 +48,7 @@ def get_odds():
 
     return []
 
-# ---------------- MATCH ----------------
+# ---------------- CLEAN ----------------
 def clean(name):
     return (
         name.lower()
@@ -59,6 +59,7 @@ def clean(name):
         .replace("losangeles", "la")
     )
 
+# ---------------- MATCH (FINAL FIX) ----------------
 def find_market(home, away, odds):
     home_c = clean(home)
     away_c = clean(away)
@@ -67,9 +68,17 @@ def find_market(home, away, odds):
         h = clean(game.get("home_team", ""))
         a = clean(game.get("away_team", ""))
 
-        # 🔥 FLEXIBLE MATCH
-        if (home_c in h or h in home_c) and (away_c in a or a in away_c):
+        # 🔥 robust matching (order + naming safe)
+        teams_api = {h, a}
+        teams_espn = {home_c, away_c}
 
+        match_count = 0
+        for t1 in teams_api:
+            for t2 in teams_espn:
+                if t1 in t2 or t2 in t1:
+                    match_count += 1
+
+        if match_count >= 2:
             totals = []
 
             for book in game.get("bookmakers", []):
@@ -80,9 +89,7 @@ def find_market(home, away, odds):
                                 totals.append(float(o["point"]))
 
             if totals:
-                sharp_line = max(totals)
-                soft_line = min(totals)
-                return sharp_line, soft_line
+                return max(totals), min(totals)
 
     return None, None
 
@@ -137,7 +144,7 @@ def check():
             progress = (outs / 3) + (runs * 0.6)
             print("Progress:", round(progress, 2))
 
-            # 🔥 HARD TIMING FILTER (FIRST)
+            # 🔥 HARD TIMING FILTER FIRST
             if progress < 3.0:
                 print("⏭️ Too early")
                 continue
@@ -162,7 +169,7 @@ def check():
                 print("⏭️ Bad market")
                 continue
 
-            # 🔥 GAP FILTER BEFORE MODEL
+            # ---------------- GAP ----------------
             line_gap = round(sharp - soft, 2)
             print("Gap:", line_gap)
 
@@ -179,7 +186,7 @@ def check():
             game_id = f"{home}-{away}"
             key = f"{game_id}-{int(progress)}"
 
-            # ---------------- EDGE TIER ----------------
+            # ---------------- EDGE FILTER ----------------
             if abs(edge) >= 4:
                 tier = "ELITE"
             elif abs(edge) >= 2.8:
@@ -188,7 +195,7 @@ def check():
                 print("⏭️ Edge too small")
                 continue
 
-            # ---------------- DUPLICATE FILTER ----------------
+            # ---------------- DUPLICATE ----------------
             if key in alerted:
                 print("⏭️ Already alerted")
                 continue
