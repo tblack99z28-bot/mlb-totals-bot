@@ -25,16 +25,24 @@ def get_games():
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}"
     return requests.get(url).json()
 
+# ---------------- 🔥 FIXED LIVE FEED (CACHE BUSTER) ----------------
 def get_live(gamePk):
-    url = f"https://statsapi.mlb.com/api/v1.1/game/{gamePk}/feed/live"
-    return requests.get(url).json()
+    ts = int(time.time())  # 🔥 prevents caching
+
+    url = f"https://statsapi.mlb.com/api/v1.1/game/{gamePk}/feed/live?_={ts}"
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache"
+    }
+
+    return requests.get(url, headers=headers).json()
 
 # ---------------- 🔥 TRUE LIVE DETECTION ----------------
 def is_live(live):
     try:
         plays = live.get("liveData", {}).get("plays", {}).get("allPlays", [])
 
-        # 🔥 REAL SIGNAL: plays exist
         if len(plays) > 0:
             return True
 
@@ -76,9 +84,10 @@ def check():
             except:
                 continue
 
-            # 🔥 DEBUG: show plays count
+            # 🔥 DEBUG: check plays
             plays = live.get("liveData", {}).get("plays", {}).get("allPlays", [])
-            print(f"Game {gamePk} | Plays: {len(plays)}")
+            if len(plays) > 0:
+                print(f"🔥 Game {gamePk} LIVE | Plays: {len(plays)}")
 
             if not is_live(live):
                 continue
