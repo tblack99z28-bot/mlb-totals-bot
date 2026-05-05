@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (CLEAN FINAL FIXED) STARTING...")
+print("🚀 SHARP+ BOT (FINAL CLEAN + MATCH FIX) STARTING...")
 
 import requests
 import time
@@ -50,7 +50,14 @@ def get_odds():
 
 # ---------------- MATCH ----------------
 def clean(name):
-    return name.lower().replace(" ", "")
+    return (
+        name.lower()
+        .replace(" ", "")
+        .replace(".", "")
+        .replace("-", "")
+        .replace("newyork", "ny")
+        .replace("losangeles", "la")
+    )
 
 def find_market(home, away, odds):
     home_c = clean(home)
@@ -60,8 +67,8 @@ def find_market(home, away, odds):
         h = clean(game.get("home_team", ""))
         a = clean(game.get("away_team", ""))
 
-        # 🔥 FIXED MATCH (handles reversed teams)
-        if (home_c in h and away_c in a) or (home_c in a and away_c in h):
+        # 🔥 FLEXIBLE MATCH
+        if (home_c in h or h in home_c) and (away_c in a or a in away_c):
 
             totals = []
 
@@ -126,9 +133,7 @@ def check():
             print(f"\n{away} vs {home}")
             print(f"Runs: {runs} | Outs: {outs}")
 
-            # ======================
-            # 🔥 PROGRESS FIRST
-            # ======================
+            # ---------------- PROGRESS ----------------
             progress = (outs / 3) + (runs * 0.6)
             print("Progress:", round(progress, 2))
 
@@ -141,9 +146,7 @@ def check():
                 print("⏭️ Game not stable yet")
                 continue
 
-            # ======================
-            # 🔥 MARKET
-            # ======================
+            # ---------------- MARKET ----------------
             sharp, soft = find_market(home, away, odds)
 
             if sharp is None:
@@ -167,9 +170,7 @@ def check():
                 print("⏭️ No sharp disagreement")
                 continue
 
-            # ======================
-            # 🔥 MODEL
-            # ======================
+            # ---------------- MODEL ----------------
             model = project_total(runs, progress)
             edge = round(model - soft, 2)
 
@@ -178,9 +179,7 @@ def check():
             game_id = f"{home}-{away}"
             key = f"{game_id}-{int(progress)}"
 
-            # ======================
-            # 🔥 EDGE TIERING
-            # ======================
+            # ---------------- EDGE TIER ----------------
             if abs(edge) >= 4:
                 tier = "ELITE"
             elif abs(edge) >= 2.8:
@@ -189,16 +188,12 @@ def check():
                 print("⏭️ Edge too small")
                 continue
 
-            # ======================
-            # 🔥 DUPLICATE FILTER
-            # ======================
+            # ---------------- DUPLICATE FILTER ----------------
             if key in alerted:
                 print("⏭️ Already alerted")
                 continue
 
-            # ======================
-            # 🚨 SIGNAL
-            # ======================
+            # ---------------- SIGNAL ----------------
             bet = "OVER" if edge > 0 else "UNDER"
 
             print(f"🚨 {tier} SIGNAL:", bet)
