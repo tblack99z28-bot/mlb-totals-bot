@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT STARTING...")
+print("🚀 SHARP+ DEBUG BOT STARTING...")
 
 import requests
 import time
@@ -42,8 +42,10 @@ def get_odds():
         data = requests.get(url, params=params).json()
         if isinstance(data, list):
             return data
-    except:
-        pass
+        else:
+            print("ODDS ERROR:", data)
+    except Exception as e:
+        print("ODDS EXCEPTION:", e)
 
     return []
 
@@ -52,14 +54,14 @@ def clean(name):
     return name.lower().replace(" ", "")
 
 def find_market(home, away, odds):
-    home = clean(home)
-    away = clean(away)
+    home_c = clean(home)
+    away_c = clean(away)
 
     for game in odds:
         h = clean(game.get("home_team", ""))
         a = clean(game.get("away_team", ""))
 
-        if home in h and away in a:
+        if home_c in h and away_c in a:
             for book in game.get("bookmakers", []):
                 for market in book.get("markets", []):
                     if market.get("key") == "totals":
@@ -94,10 +96,7 @@ def project_total(runs, inning, half, outs):
 
     proj = (raw * w) + (BASELINE * (1 - w))
 
-    if proj > 15:
-        proj = 15
-    if proj < 3:
-        proj = 3
+    proj = max(3, min(15, proj))
 
     if inning >= 7:
         proj += 0.4
@@ -110,6 +109,9 @@ def project_total(runs, inning, half, outs):
 def check():
     espn_games = get_espn_games()
     odds = get_odds()
+
+    print("ESPN Games:", len(espn_games))
+    print("Odds Games:", len(odds))
 
     for g in espn_games:
         try:
@@ -124,7 +126,11 @@ def check():
             runs = home_score + away_score
 
             status = g["status"]["type"]["description"]
+
+            print(f"\n{away} vs {home} | Status: {status}")
+
             if "In Progress" not in status:
+                print("⏭️ Skipped: not live")
                 continue
 
             situation = comp.get("situation", {})
@@ -137,71 +143,75 @@ def check():
                 innings += 0.5
             innings += outs / 3
 
-            if innings < 2.5:
+            print(f"Runs: {runs} | Inning: {inning} {half} | Outs: {outs}")
+            print(f"Innings calc: {innings}")
+
+            # 🔥 TEMP: loosen filter so you SEE games
+            if innings < 1.5:
+                print("⏭️ Skipped: too early")
                 continue
 
             market = find_market(home, away, odds)
+
             if market is None:
+                print("❌ No market match")
                 continue
 
-            # 🚫 ignore broken totals
-            if market < 5 or market > 15:
+            print("Market found:", market)
+
+            # loosen filter for now
+            if market < 4 or market > 16:
+                print("⏭️ Skipped: weird market")
                 continue
 
             model = project_total(runs, inning, half, outs)
             edge = round(model - market, 2)
 
+            print("Model:", model, "| Edge:", edge)
+
             game_id = f"{home}-{away}"
 
-            # ---------------- 📈 LINE MOVEMENT ----------------
             prev = last_markets.get(game_id)
             movement = 0
 
             if prev:
-                movement = market - prev
+                movement = round(market - prev, 2)
 
             last_markets[game_id] = market
 
-            print(f"{away} vs {home}")
-            print("Runs:", runs, "| Market:", market, "| Model:", model)
-            print("Edge:", edge, "| Move:", movement)
+            print("Line movement:", movement)
 
             key = f"{game_id}-{inning}"
 
             if key in alerted:
+                print("⏭️ Already alerted")
                 continue
 
-            # ---------------- 🎯 SIGNAL TIERS ----------------
+            # 🔥 TEMP LOWER THRESHOLD FOR DEBUG
+            if abs(edge) < 0.8:
+                print("⏭️ Edge too small")
+                continue
+
             bet = "OVER" if edge > 0 else "UNDER"
 
-            # 🔥 A+ PLAY
-            if abs(edge) >= 1.5 and abs(movement) >= 0.5:
-                send(
-                    f"🔥 A+ PLAY ({bet})\n"
-                    f"{away} vs {home}\n"
-                    f"Inning {inning}\n\n"
-                    f"Runs: {runs}\nMarket: {market}\nModel: {model}\nEdge: {edge}\nMove: {movement}"
-                )
-                alerted.add(key)
-                continue
+            print("🚨 SIGNAL:", bet)
 
-            # ⚡ B PLAY
-            if abs(edge) >= 1.0:
-                send(
-                    f"⚡ B PLAY ({bet})\n"
-                    f"{away} vs {home}\n"
-                    f"Inning {inning}\n\n"
-                    f"Runs: {runs}\nMarket: {market}\nModel: {model}\nEdge: {edge}"
-                )
-                alerted.add(key)
+            send(
+                f"🚨 LIVE TOTAL ({bet})\n"
+                f"{away} vs {home}\n"
+                f"Inning {inning}\n\n"
+                f"Runs: {runs}\nMarket: {market}\nModel: {model}\nEdge: {edge}"
+            )
+
+            alerted.add(key)
 
         except Exception as e:
-            print("Error:", e)
+            print("Game error:", e)
 
 # ---------------- LOOP ----------------
 while True:
     try:
-        print("\n=== SHARP CHECK ===")
+        print("\n=== SHARP DEBUG CHECK ===")
         check()
     except Exception as e:
         print("MAIN ERROR:", e)
