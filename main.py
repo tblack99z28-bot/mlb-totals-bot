@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (ULTRA-SHARP + SAFE TWEAK) STARTING...")
+print("🚀 SHARP+ BOT (FINAL SYSTEM) STARTING...")
 
 import requests
 import time
@@ -8,11 +8,7 @@ from datetime import datetime, timezone
 WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 
-print("WEBHOOK:", "SET" if WEBHOOK else "MISSING")
-print("ODDS API:", "SET" if ODDS_API_KEY else "MISSING")
-
 alerted = set()
-
 MAX_MARKET_AGE_SEC = 60
 
 # ---------------- DISCORD ----------------
@@ -24,7 +20,7 @@ def send(msg):
             pass
 
 # ---------------- ESPN ----------------
-def get_espn_games():
+def get_games():
     try:
         url = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
         return requests.get(url, timeout=10).json().get("events", [])
@@ -45,18 +41,10 @@ def get_odds():
     except:
         return []
 
-# ---------------- CLEAN ----------------
+# ---------------- HELPERS ----------------
 def clean(name):
-    return (
-        name.lower()
-        .replace(" ", "")
-        .replace(".", "")
-        .replace("-", "")
-        .replace("newyork", "ny")
-        .replace("losangeles", "la")
-    )
+    return name.lower().replace(" ", "").replace(".", "").replace("-", "")
 
-# ---------------- TIME ----------------
 def parse_iso(ts):
     try:
         return datetime.fromisoformat(ts.replace("Z", "+00:00"))
@@ -72,7 +60,7 @@ def is_fresh(ts):
     age = (datetime.now(timezone.utc) - dt).total_seconds()
     return age <= MAX_MARKET_AGE_SEC
 
-# ---------------- TOTALS ----------------
+# ---------------- MARKET ----------------
 def extract_totals(game):
     totals = []
     for book in game.get("bookmakers", []):
@@ -88,51 +76,110 @@ def extract_totals(game):
                         totals.append(float(o["point"]))
     return totals
 
-# ---------------- MATCH ----------------
 def find_market(home, away, odds):
-    home_c = clean(home)
-    away_c = clean(away)
+    home_c, away_c = clean(home), clean(away)
 
-    for game in odds:
-        h = clean(game.get("home_team", ""))
-        a = clean(game.get("away_team", ""))
-
-        if (home_c in h and away_c in a) or (home_c in a and away_c in h):
-            totals = extract_totals(game)
+    for g in odds:
+        h, a = clean(g.get("home_team","")), clean(g.get("away_team",""))
+        if home_c in h and away_c in a or home_c in a and away_c in h:
+            totals = extract_totals(g)
             if totals:
                 return max(totals), min(totals)
 
     print("⚠️ Trying fallback match...")
-    for game in odds:
-        h = clean(game.get("home_team", ""))
-        a = clean(game.get("away_team", ""))
-
+    for g in odds:
+        h, a = clean(g.get("home_team","")), clean(g.get("away_team",""))
         if home_c in h or away_c in a or home_c in a or away_c in h:
-            totals = extract_totals(game)
+            totals = extract_totals(g)
             if totals:
                 print("✅ Fallback match found")
                 return max(totals), min(totals)
 
     return None, None
 
+# ---------------- CONTEXT ----------------
+def context_filter(runs, progress):
+    if progress < 3.5 and runs >= 7:
+        return "early chaos"
+    if runs >= 12 and progress < 6:
+        return "blowout slowdown"
+    return None
+
 # ---------------- MODEL ----------------
 def project_total(runs, progress):
-    BASELINE = 8.8
-
-    if progress < 3:
-        return round(BASELINE + (runs * 0.3), 2)
+    BASE = 8.8
+    if progress <= 0:
+        return BASE
 
     pace = runs / progress
-    raw = pace * 9
 
-    w = 0.25 if progress < 5 else 0.4 if progress < 7 else 0.6
-    proj = (raw * w) + (BASELINE * (1 - w))
+    # spike control
+    if progress < 3 and pace > 2.2:
+        pace = 1.4
+    elif progress < 4 and pace > 1.8:
+        pace = 1.55
+    else:
+        pace = min(pace, 1.7)
 
-    return round(max(4, min(14, proj)), 2)
+    # decay
+    if progress < 3:
+        decay = 0.75
+    elif progress < 5:
+        decay = 0.85
+    elif progress < 7:
+        decay = 0.95
+    else:
+        decay = 1.0
+
+    raw = pace * 9 * decay
+
+    # weighting
+    if progress < 3:
+        w = 0.15
+    elif progress < 5:
+        w = 0.3
+    elif progress < 7:
+        w = 0.5
+    else:
+        w = 0.7
+
+    proj = (raw * w) + (BASE * (1 - w))
+
+    # bullpen
+    if progress > 5:
+        proj += 0.3
+    if progress > 7:
+        proj += 0.6
+
+    proj = max(runs + 0.5, proj)
+    proj = min(15.5, proj)
+
+    return round(proj, 2)
+
+# ---------------- SCORING ----------------
+def confidence(edge, gap, progress):
+    score = 0
+
+    if abs(edge) >= 4:
+        score += 3
+    elif abs(edge) >= 2.5:
+        score += 2
+
+    if gap >= 1.5:
+        score += 2
+    elif gap >= 0.7:
+        score += 1
+
+    if progress > 5:
+        score += 2
+    elif progress > 4:
+        score += 1
+
+    return score
 
 # ---------------- MAIN ----------------
-def check():
-    games = get_espn_games()
+def run():
+    games = get_games()
     odds = get_odds()
 
     print("Games:", len(games), "| Odds:", len(odds))
@@ -148,86 +195,80 @@ def check():
             runs = int(teams[0]["score"]) + int(teams[1]["score"])
             outs = comp.get("situation", {}).get("outs", 0)
 
-            print(f"\n{away} vs {home}")
-            print(f"Runs: {runs} | Outs: {outs}")
-
             progress = (outs / 3) + (runs * 0.6)
-            print("Progress:", round(progress, 2))
 
-            if progress < 3.0:
+            print(f"\n{away} vs {home}")
+            print(f"Runs: {runs} | Progress: {round(progress,2)}")
+
+            if progress < 3:
                 print("⏭️ Too early")
                 continue
 
-            # 🔥 ONLY CHANGE HERE
             if progress < 3.5:
-                print("⏭️ Game not stable yet")
+                print("⏭️ Not stable")
+                continue
+
+            reason = context_filter(runs, progress)
+            if reason:
+                print(f"⏭️ Context: {reason}")
                 continue
 
             sharp, soft = find_market(home, away, odds)
             if sharp is None:
-                print("❌ No market match")
+                print("❌ No market")
                 continue
 
-            sharp, soft = round(sharp, 1), round(soft, 1)
+            sharp, soft = round(sharp,1), round(soft,1)
             print("Sharp:", sharp, "| Soft:", soft)
 
             if runs >= soft:
-                print("⏭️ Line already dead")
-                continue
-
-            if runs <= soft - 12:
-                print("⏭️ Unrealistic low")
-                continue
-
-            if soft < 4 or soft > 16:
-                print("⏭️ Bad market")
+                print("⏭️ Dead line")
                 continue
 
             gap = round(sharp - soft, 2)
             print("Gap:", gap)
 
             if gap < 0.6:
-                print("⏭️ No sharp disagreement")
+                print("⏭️ No edge")
                 continue
 
             model = project_total(runs, progress)
-            edge = round(model - soft, 2)
+
+            mid = (sharp + soft) / 2
+            edge = round(model - mid, 2)
 
             print("Model:", model, "| Edge:", edge)
 
-            key = f"{home}-{away}-{int(progress)}"
+            score = confidence(edge, gap, progress)
 
-            if abs(edge) >= 4:
-                tier = "ELITE"
-            elif abs(edge) >= 2.8:
-                tier = "STRONG"
-            else:
-                print("⏭️ Edge too small")
+            if score < 4:
+                print("⏭️ Low confidence")
                 continue
 
+            tier = "ELITE" if score >= 6 else "STRONG"
+
+            key = f"{home}-{away}-{int(progress)}"
             if key in alerted:
-                print("⏭️ Already alerted")
+                print("⏭️ Already sent")
                 continue
 
             bet = "OVER" if edge > 0 else "UNDER"
-            print(f"🚨 {tier} SIGNAL:", bet)
+
+            print(f"🚨 {tier}: {bet}")
 
             send(
-                f"🚨 {tier} LIVE TOTAL ({bet})\n{away} vs {home}\n\n"
+                f"🚨 {tier} LIVE TOTAL ({bet})\n"
+                f"{away} vs {home}\n\n"
                 f"Runs: {runs}\nSoft: {soft}\nSharp: {sharp}\nGap: {gap}\nModel: {model}\nEdge: {edge}"
             )
 
             alerted.add(key)
 
         except Exception as e:
-            print("Game error:", e)
+            print("Error:", e)
 
 # ---------------- LOOP ----------------
 while True:
-    try:
-        print("\n=== SHARP CHECK ===")
-        check()
-    except Exception as e:
-        print("MAIN ERROR:", e)
-
+    print("\n=== SHARP CHECK ===")
+    run()
     time.sleep(10)
