@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (FINAL SYSTEM) STARTING...")
+print("🚀 SHARP+ BOT (LOW-NOISE FINAL) STARTING...")
 
 import requests
 import time
@@ -9,7 +9,6 @@ WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 
 alerted = set()
-MAX_MARKET_AGE_SEC = 60
 
 # ---------------- DISCORD ----------------
 def send(msg):
@@ -45,65 +44,23 @@ def get_odds():
 def clean(name):
     return name.lower().replace(" ", "").replace(".", "").replace("-", "")
 
-def parse_iso(ts):
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except:
-        return None
-
-def is_fresh(ts):
-    if not ts:
-        return True
-    dt = parse_iso(ts)
-    if not dt:
-        return True
-    age = (datetime.now(timezone.utc) - dt).total_seconds()
-    return age <= MAX_MARKET_AGE_SEC
-
-# ---------------- MARKET ----------------
-def extract_totals(game):
-    totals = []
-    for book in game.get("bookmakers", []):
-        if book.get("in_play") is False:
-            continue
-        if not is_fresh(book.get("last_update")):
-            continue
-
-        for market in book.get("markets", []):
-            if market.get("key") == "totals":
-                for o in market.get("outcomes", []):
-                    if "point" in o:
-                        totals.append(float(o["point"]))
-    return totals
-
 def find_market(home, away, odds):
-    home_c, away_c = clean(home), clean(away)
+    h, a = clean(home), clean(away)
 
     for g in odds:
-        h, a = clean(g.get("home_team","")), clean(g.get("away_team",""))
-        if home_c in h and away_c in a or home_c in a and away_c in h:
-            totals = extract_totals(g)
+        gh, ga = clean(g.get("home_team","")), clean(g.get("away_team",""))
+        if h in gh and a in ga or h in ga and a in gh:
+            totals = []
+            for book in g.get("bookmakers", []):
+                for market in book.get("markets", []):
+                    if market.get("key") == "totals":
+                        for o in market.get("outcomes", []):
+                            if "point" in o:
+                                totals.append(float(o["point"]))
             if totals:
-                return max(totals), min(totals)
-
-    print("⚠️ Trying fallback match...")
-    for g in odds:
-        h, a = clean(g.get("home_team","")), clean(g.get("away_team",""))
-        if home_c in h or away_c in a or home_c in a or away_c in h:
-            totals = extract_totals(g)
-            if totals:
-                print("✅ Fallback match found")
                 return max(totals), min(totals)
 
     return None, None
-
-# ---------------- CONTEXT ----------------
-def context_filter(runs, progress):
-    if progress < 3.5 and runs >= 7:
-        return "early chaos"
-    if runs >= 12 and progress < 6:
-        return "blowout slowdown"
-    return None
 
 # ---------------- MODEL ----------------
 def project_total(runs, progress):
@@ -156,26 +113,28 @@ def project_total(runs, progress):
 
     return round(proj, 2)
 
-# ---------------- SCORING ----------------
-def confidence(edge, gap, progress):
-    score = 0
+# ---------------- CONTEXT ----------------
+def context_filter(runs, progress):
+    if progress < 3.5 and runs >= 7:
+        return True
+    if runs >= 12 and progress < 6:
+        return True
+    return False
 
-    if abs(edge) >= 4:
-        score += 3
-    elif abs(edge) >= 2.5:
-        score += 2
+# ---------------- CONFLUENCE FILTER ----------------
+def passes_confluence(edge, gap, progress):
+    checks = 0
 
-    if gap >= 1.5:
-        score += 2
-    elif gap >= 0.7:
-        score += 1
+    if abs(edge) >= 2.5:
+        checks += 1
 
-    if progress > 5:
-        score += 2
-    elif progress > 4:
-        score += 1
+    if gap >= 1.0:
+        checks += 1
 
-    return score
+    if progress >= 5:
+        checks += 1
+
+    return checks >= 2
 
 # ---------------- MAIN ----------------
 def run():
@@ -200,6 +159,7 @@ def run():
             print(f"\n{away} vs {home}")
             print(f"Runs: {runs} | Progress: {round(progress,2)}")
 
+            # TIMING
             if progress < 3:
                 print("⏭️ Too early")
                 continue
@@ -208,9 +168,9 @@ def run():
                 print("⏭️ Not stable")
                 continue
 
-            reason = context_filter(runs, progress)
-            if reason:
-                print(f"⏭️ Context: {reason}")
+            # CONTEXT
+            if context_filter(runs, progress):
+                print("⏭️ Context skip")
                 continue
 
             sharp, soft = find_market(home, away, odds)
@@ -221,6 +181,7 @@ def run():
             sharp, soft = round(sharp,1), round(soft,1)
             print("Sharp:", sharp, "| Soft:", soft)
 
+            # DEAD LINE
             if runs >= soft:
                 print("⏭️ Dead line")
                 continue
@@ -228,8 +189,8 @@ def run():
             gap = round(sharp - soft, 2)
             print("Gap:", gap)
 
-            if gap < 0.6:
-                print("⏭️ No edge")
+            if gap < 0.4:
+                print("⏭️ No sharp edge")
                 continue
 
             model = project_total(runs, progress)
@@ -237,15 +198,16 @@ def run():
             mid = (sharp + soft) / 2
             edge = round(model - mid, 2)
 
-            print("Model:", model, "| Edge:", edge)
+            print(f"📊 MODEL vs MARKET → {model} vs {round(mid,2)}")
+            print("Edge:", edge)
 
-            score = confidence(edge, gap, progress)
-
-            if score < 4:
-                print("⏭️ Low confidence")
+            # 🔥 NOISE FILTER
+            if not passes_confluence(edge, gap, progress):
+                print("⏭️ No confluence")
                 continue
 
-            tier = "ELITE" if score >= 6 else "STRONG"
+            # SIGNAL
+            tier = "ELITE" if abs(edge) >= 4 and gap >= 1.5 else "STRONG"
 
             key = f"{home}-{away}-{int(progress)}"
             if key in alerted:
