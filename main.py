@@ -1,9 +1,8 @@
-print("🚀 SHARP+ BOT (TIMING UPGRADE) STARTING...")
+print("🚀 SHARP+ BOT (TIMING + NO 9TH INNING) STARTING...")
 
 import requests
 import time
 import os
-from datetime import datetime
 
 WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
@@ -108,7 +107,7 @@ def passes_confluence(edge, gap, progress):
 
 # ---------------- CONFIRMATION ----------------
 def confirm_signal(home, away, runs, progress, original_edge):
-    time.sleep(6)  # wait briefly
+    time.sleep(6)
 
     odds = get_odds()
     sharp, soft = find_market(home, away, odds)
@@ -122,7 +121,6 @@ def confirm_signal(home, away, runs, progress, original_edge):
 
     new_edge = model - mid
 
-    # must still be strong
     if abs(new_edge) >= abs(original_edge) * 0.75:
         return True, new_edge
 
@@ -151,11 +149,18 @@ def run():
             print(f"\n{away} vs {home}")
             print(f"Runs: {runs} | Progress: {round(progress,2)}")
 
+            # ---- TIMING FILTERS ----
             if progress < 3:
                 print("⏭️ Too early")
                 continue
+
             if progress < 3.5:
                 print("⏭️ Not stable")
+                continue
+
+            # 🚫 NEW: BLOCK 9TH INNING+
+            if progress >= 8.5:
+                print("⏭️ Too late (9th inning+)")
                 continue
 
             sharp, soft = find_market(home, away, odds)
@@ -189,7 +194,7 @@ def run():
                 print("⏭️ No confluence")
                 continue
 
-            # 🔥 NEW TIMING CONFIRMATION
+            # ---- TIMING CONFIRMATION ----
             ok, new_edge = confirm_signal(home, away, runs, progress, edge)
 
             if not ok:
