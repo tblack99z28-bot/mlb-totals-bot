@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (FINAL + PREGAME INTEGRATION) STARTING...")
+print("🚀 SHARP+ BOT (TIMING UPGRADE) STARTING...")
 
 import requests
 import time
@@ -62,79 +62,10 @@ def find_market(home, away, odds):
 
     return None, None
 
-# ---------------- PREGAME ----------------
-def get_starting_pitchers(game):
-    try:
-        comps = game["competitions"][0]
-        teams = comps["competitors"]
-
-        home_pitcher = teams[0].get("probablePitcher")
-        away_pitcher = teams[1].get("probablePitcher")
-
-        def era(p):
-            if not p:
-                return None
-            stats = p.get("statistics", [])
-            for s in stats:
-                if s.get("name") == "era":
-                    return float(s.get("displayValue"))
-            return None
-
-        return era(home_pitcher), era(away_pitcher)
-    except:
-        return None, None
-
-def pitcher_adjustment(home_era, away_era):
-    if home_era is None or away_era is None:
-        return 0
-
-    avg = (home_era + away_era) / 2
-
-    if avg < 3.5:
-        return -1.0
-    elif avg < 4.2:
-        return -0.5
-    elif avg > 5.0:
-        return +1.0
-    elif avg > 4.5:
-        return +0.5
-    else:
-        return 0
-
-PARK_FACTORS = {
-    "Colorado Rockies": 1.2,
-    "Boston Red Sox": 0.3,
-    "New York Yankees": 0.3,
-    "Cincinnati Reds": 0.4,
-    "Chicago Cubs": 0.2,
-    "San Diego Padres": -0.2,
-    "San Francisco Giants": -0.4,
-    "Seattle Mariners": -0.3,
-    "Detroit Tigers": -0.2,
-}
-
-def park_adjustment(home_team):
-    return PARK_FACTORS.get(home_team, 0)
-
-def get_dynamic_baseline(game, home_team, progress):
-    home_era, away_era = get_starting_pitchers(game)
-
-    p_adj = pitcher_adjustment(home_era, away_era)
-    park_adj = park_adjustment(home_team)
-
-    bullpen_adj = 0
-    if progress > 5:
-        bullpen_adj += 0.3
-    if progress > 7:
-        bullpen_adj += 0.5
-
-    baseline = 8.8 + p_adj + park_adj + bullpen_adj
-    return max(7.0, min(11.5, baseline))
-
 # ---------------- MODEL ----------------
-def project_total(runs, progress, BASE):
+def project_total(runs, progress, base):
     if progress <= 0:
-        return BASE
+        return base
 
     pace = runs / progress
 
@@ -145,52 +76,57 @@ def project_total(runs, progress, BASE):
     else:
         pace = min(pace, 1.7)
 
-    if progress < 3:
-        decay = 0.75
-    elif progress < 5:
-        decay = 0.85
-    elif progress < 7:
-        decay = 0.95
-    else:
-        decay = 1.0
+    decay = 0.75 if progress < 3 else 0.85 if progress < 5 else 0.95 if progress < 7 else 1
 
     raw = pace * 9 * decay
 
-    if progress < 3:
-        w = 0.15
-    elif progress < 5:
-        w = 0.3
-    elif progress < 7:
-        w = 0.5
-    else:
-        w = 0.7
+    w = 0.15 if progress < 3 else 0.3 if progress < 5 else 0.5 if progress < 7 else 0.7
 
-    proj = (raw * w) + (BASE * (1 - w))
+    proj = (raw * w) + (base * (1 - w))
 
-    proj = max(runs + 0.5, proj)
-    proj = min(15.5, proj)
+    return round(max(runs + 0.5, min(15.5, proj)), 2)
 
-    return round(proj, 2)
+# ---------------- BASELINE ----------------
+def get_baseline(progress):
+    base = 8.8
+    if progress > 5:
+        base += 0.3
+    if progress > 7:
+        base += 0.5
+    return base
 
-# ---------------- FILTERS ----------------
-def context_filter(runs, progress):
-    if progress < 3.5 and runs >= 7:
-        return True
-    if runs >= 12 and progress < 6:
-        return True
-    return False
-
+# ---------------- FILTER ----------------
 def passes_confluence(edge, gap, progress):
     checks = 0
-
-    if abs(edge) >= 2.5:
+    if abs(edge) >= 2.0:
         checks += 1
     if gap >= 1.0:
         checks += 1
     if progress >= 5:
         checks += 1
-
     return checks >= 2
+
+# ---------------- CONFIRMATION ----------------
+def confirm_signal(home, away, runs, progress, original_edge):
+    time.sleep(6)  # wait briefly
+
+    odds = get_odds()
+    sharp, soft = find_market(home, away, odds)
+
+    if sharp is None:
+        return False, None
+
+    mid = (sharp + soft) / 2
+    base = get_baseline(progress)
+    model = project_total(runs, progress, base)
+
+    new_edge = model - mid
+
+    # must still be strong
+    if abs(new_edge) >= abs(original_edge) * 0.75:
+        return True, new_edge
+
+    return False, new_edge
 
 # ---------------- MAIN ----------------
 def run():
@@ -218,13 +154,8 @@ def run():
             if progress < 3:
                 print("⏭️ Too early")
                 continue
-
             if progress < 3.5:
                 print("⏭️ Not stable")
-                continue
-
-            if context_filter(runs, progress):
-                print("⏭️ Context skip")
                 continue
 
             sharp, soft = find_market(home, away, odds)
@@ -232,48 +163,54 @@ def run():
                 print("❌ No market")
                 continue
 
-            sharp, soft = round(sharp,1), round(soft,1)
-            print("Sharp:", sharp, "| Soft:", soft)
-
             if runs >= soft:
                 print("⏭️ Dead line")
                 continue
 
-            gap = round(sharp - soft, 2)
-            print("Gap:", gap)
-
+            gap = sharp - soft
             if gap < 0.4:
                 print("⏭️ No sharp edge")
                 continue
 
-            baseline = get_dynamic_baseline(g, home, progress)
-            model = project_total(runs, progress, baseline)
+            base = get_baseline(progress)
+            model = project_total(runs, progress, base)
 
             mid = (sharp + soft) / 2
-            edge = round(model - mid, 2)
+            edge = model - mid
 
             print(f"📊 MODEL vs MARKET → {model} vs {round(mid,2)}")
-            print("Edge:", edge)
+            print(f"Edge: {round(edge,2)}")
+
+            if abs(edge) < 1:
+                print("⏭️ Edge too small")
+                continue
 
             if not passes_confluence(edge, gap, progress):
                 print("⏭️ No confluence")
                 continue
 
-            tier = "ELITE" if abs(edge) >= 4 and gap >= 1.5 else "STRONG"
+            # 🔥 NEW TIMING CONFIRMATION
+            ok, new_edge = confirm_signal(home, away, runs, progress, edge)
+
+            if not ok:
+                print("⏭️ Lost edge after confirmation")
+                continue
+
+            tier = "ELITE" if abs(new_edge) >= 4 else "STRONG"
 
             key = f"{home}-{away}-{int(progress)}"
             if key in alerted:
                 print("⏭️ Already sent")
                 continue
 
-            bet = "OVER" if edge > 0 else "UNDER"
+            bet = "OVER" if new_edge > 0 else "UNDER"
 
             print(f"🚨 {tier}: {bet}")
 
             send(
                 f"🚨 {tier} LIVE TOTAL ({bet})\n"
                 f"{away} vs {home}\n\n"
-                f"Runs: {runs}\nSoft: {soft}\nSharp: {sharp}\nGap: {gap}\nModel: {model}\nEdge: {edge}"
+                f"Runs: {runs}\nLine: {soft}\nModel: {model}\nEdge: {round(new_edge,2)}"
             )
 
             alerted.add(key)
