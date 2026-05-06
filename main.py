@@ -1,4 +1,4 @@
-print("🚀 SHARP+ BOT (TIMING + NO 9TH INNING) STARTING...")
+print("🚀 SHARP+ BOT (FAST TIMING + NO LATE INNINGS) STARTING...")
 
 import requests
 import time
@@ -76,11 +76,9 @@ def project_total(runs, progress, base):
         pace = min(pace, 1.7)
 
     decay = 0.75 if progress < 3 else 0.85 if progress < 5 else 0.95 if progress < 7 else 1
-
     raw = pace * 9 * decay
 
     w = 0.15 if progress < 3 else 0.3 if progress < 5 else 0.5 if progress < 7 else 0.7
-
     proj = (raw * w) + (base * (1 - w))
 
     return round(max(runs + 0.5, min(15.5, proj)), 2)
@@ -105,9 +103,9 @@ def passes_confluence(edge, gap, progress):
         checks += 1
     return checks >= 2
 
-# ---------------- CONFIRMATION ----------------
+# ---------------- FAST CONFIRMATION ----------------
 def confirm_signal(home, away, runs, progress, original_edge):
-    time.sleep(6)
+    time.sleep(2)  # 🔥 faster confirmation
 
     odds = get_odds()
     sharp, soft = find_market(home, away, odds)
@@ -121,7 +119,8 @@ def confirm_signal(home, away, runs, progress, original_edge):
 
     new_edge = model - mid
 
-    if abs(new_edge) >= abs(original_edge) * 0.75:
+    # 🔥 relaxed threshold
+    if abs(new_edge) >= abs(original_edge) * 0.6:
         return True, new_edge
 
     return False, new_edge
@@ -158,9 +157,9 @@ def run():
                 print("⏭️ Not stable")
                 continue
 
-            # 🚫 NEW: BLOCK 9TH INNING+
-            if progress >= 8.5:
-                print("⏭️ Too late (9th inning+)")
+            # 🚫 BLOCK LATE GAME (8th+ / 9th)
+            if progress >= 8.0:
+                print("⏭️ Too late (8th inning+)")
                 continue
 
             sharp, soft = find_market(home, away, odds)
@@ -194,8 +193,12 @@ def run():
                 print("⏭️ No confluence")
                 continue
 
-            # ---- TIMING CONFIRMATION ----
-            ok, new_edge = confirm_signal(home, away, runs, progress, edge)
+            # 🚀 INSTANT ELITE SIGNALS
+            if abs(edge) >= 4:
+                ok = True
+                new_edge = edge
+            else:
+                ok, new_edge = confirm_signal(home, away, runs, progress, edge)
 
             if not ok:
                 print("⏭️ Lost edge after confirmation")
